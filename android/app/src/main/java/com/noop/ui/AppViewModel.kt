@@ -350,6 +350,68 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    // MARK: - Workouts screen (load + manual edit · relabel · dismiss · delete) (#107)
+    //
+    // The screen observes [workouts]; every mutation re-loads it so the list reflects the new state
+    // immediately. Loads ALL sources — strap (imported + manual), Apple Health / Health Connect, and
+    // the on-device DETECTED bouts under "<deviceId>-noop" — then filters out dismissed detected bouts
+    // so a duplicate the auto-detector created is visible but removable. Mirrors macOS
+    // Repository.workoutRows.
+
+    private val _workouts = MutableStateFlow<List<WorkoutRow>>(emptyList())
+    /** All workouts for the Workouts screen (newest first), dismissed detected bouts removed. */
+    val workouts: StateFlow<List<WorkoutRow>> = _workouts.asStateFlow()
+
+    /** Re-read every source + the dismissed markers and republish [workouts]. */
+    fun loadWorkouts() {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis() / 1000
+            val whoop = repository.workouts(deviceId, 0L, now)
+            val apple = repository.workouts("apple-health", 0L, now) +
+                repository.workouts("health-connect", 0L, now)
+            val detected = repository.workouts(repository.computedDeviceId(deviceId), 0L, now)
+            val markers = repository.dismissedDetected(deviceId)
+            // Fill imported sessions' missing HR from strap samples (#77), same as before; detected /
+            // manual rows already carry their own HR so they pass through unchanged.
+            val filled = repository.fillWorkoutHrFromStrap((whoop + apple + detected))
+            _workouts.value = WorkoutEditing
+                .filterDismissed(filled, markers)
+                .sortedByDescending { it.startTs }
+        }
+    }
+
+    /** Save a retroactive / edited manual workout, then reload. [replacing] is the original on edit. */
+    fun saveManualWorkout(row: WorkoutRow, replacing: WorkoutRow? = null) {
+        viewModelScope.launch {
+            runCatching { repository.saveManualWorkout(row, replacing) }
+            loadWorkouts()
+        }
+    }
+
+    /** Re-label a detected bout to [sport] (becomes a durable manual session), then reload. */
+    fun relabelDetected(row: WorkoutRow, sport: String) {
+        viewModelScope.launch {
+            runCatching { repository.relabelDetected(row, sport) }
+            loadWorkouts()
+        }
+    }
+
+    /** Dismiss a detected bout ("not a workout") durably, then reload. */
+    fun dismissDetected(row: WorkoutRow) {
+        viewModelScope.launch {
+            runCatching { repository.dismissDetected(row) }
+            loadWorkouts()
+        }
+    }
+
+    /** Delete one workout (manual delete, or durable dismiss for a detected bout), then reload. */
+    fun deleteWorkout(row: WorkoutRow) {
+        viewModelScope.launch {
+            runCatching { repository.deleteWorkout(row) }
+            loadWorkouts()
+        }
+    }
+
     /**
      * Drop the smoothing window and blank the hero number so a resume / re-attach shows "—" until a
      * genuinely fresh sample arrives, instead of republishing the stale pre-gap median. Called on

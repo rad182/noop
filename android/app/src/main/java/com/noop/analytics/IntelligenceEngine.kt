@@ -217,11 +217,16 @@ object IntelligenceEngine {
             hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
         )
 
-        // Imported workouts in the scored window, used to de-duplicate detected bouts so a
-        // user who BOTH imports real WHOOP workouts AND wears the strap doesn't see the same
-        // session twice (the per-day mergeDaily precedence does not cover the workout table).
+        // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
+        // user who BOTH has real sessions AND wears the strap doesn't see the same session twice (the
+        // per-day mergeDaily precedence does not cover the workout table). Covers BOTH directions of
+        // the cross-source duplicate (#107): the strap source carries imported WHOOP rows AND manual /
+        // re-labelled rows (both under [importedDeviceId]); apple-health / health-connect carry Health
+        // imports — a detected bout overlapping ANY of them is skipped below.
         val windowStart = nowSeconds - maxDays.toLong() * SECONDS_PER_DAY - 30 * 3_600L
-        val importedWorkouts = repo.workouts(importedDeviceId, windowStart, nowSeconds)
+        val realWorkouts = repo.workouts(importedDeviceId, windowStart, nowSeconds) +
+            repo.workouts("apple-health", windowStart, nowSeconds) +
+            repo.workouts("health-connect", windowStart, nowSeconds)
 
         // ── Pass 2: re-score every offloaded night against the now-seeded baseline. Only the
         // recovery composite is recomputed (cheap, baseline-dependent); every other field was
@@ -267,7 +272,7 @@ object IntelligenceEngine {
             // Skip any bout overlapping a real imported workout so import+wear users don't
             // double-count. sport="detected"; energyKcal is the APPROXIMATE Keytel/BMR total.
             for (s in res.workouts) {
-                if (importedWorkouts.any { w -> s.start < w.endTs && w.startTs < s.end }) continue
+                if (realWorkouts.any { w -> s.start < w.endTs && w.startTs < s.end }) continue
                 workoutRows.add(
                     WorkoutRow(
                         deviceId = computedId,

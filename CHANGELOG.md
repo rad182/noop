@@ -17,6 +17,16 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.79 — Manual workouts, edit/dismiss auto-detected ones, and CSV export
+
+- **New (Mac and Android):** add a workout by hand, and edit, re-label, or **dismiss** the ones NOOP
+  auto-detects — so a misread or duplicate bout no longer sticks around with no way to remove it.
+  Dismissals are remembered, so a re-detected session stays hidden.
+- **New (Mac and Android):** export all your data as a WHOOP-format CSV bundle (cycles, sleeps,
+  workouts, journal) from Settings — yours to keep, and it imports straight back into NOOP.
+
+---
+
 ## 1.78 — Fewer false daytime sleeps + an Android sync button
 
 - **Fixed (Mac and Android):** a long sedentary daytime stretch no longer gets logged as sleep —

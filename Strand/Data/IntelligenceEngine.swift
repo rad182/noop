@@ -156,14 +156,18 @@ final class IntelligenceEngine: ObservableObject {
             resp: respFold.usable ? respFold : nil,
             skinTemp: Baselines.foldHistory(skinSeq, cfg: skinCfg))
 
-        // Imported workouts in the scored window, used to de-duplicate detected bouts so a user who
-        // BOTH imports real WHOOP workouts AND wears the strap doesn't see the same session twice
-        // (the per-day merge precedence does not cover the workout table). Port of the Android block
-        // in IntelligenceEngine.kt analyzeRecent.
+        // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
+        // user who BOTH has real sessions AND wears the strap doesn't see the same session twice (the
+        // per-day merge precedence does not cover the workout table). This covers BOTH directions of
+        // the cross-source duplicate (#107): the strap source carries imported WHOOP rows AND manual /
+        // re-labelled rows (both written under `deviceId`), and apple-health carries Health imports —
+        // a detected bout overlapping ANY of them is skipped below. Port of the Android dedup block.
         let computedId = deviceId + "-noop"
         let windowStart = now - maxDays * 86_400 - 30 * 3_600
-        let importedWorkouts = (try? await store.workouts(deviceId: deviceId, from: windowStart,
-                                                          to: now, limit: 100_000)) ?? []
+        var realWorkouts = (try? await store.workouts(deviceId: deviceId, from: windowStart,
+                                                       to: now, limit: 100_000)) ?? []
+        realWorkouts += (try? await store.workouts(deviceId: "apple-health", from: windowStart,
+                                                    to: now, limit: 100_000)) ?? []
 
         // ── Pass 2: re-score ONLY recovery against the now-seeded baseline (cheap, baseline-dependent);
         // every other field was computed once in pass 1. Recovery stays nil until the HRV baseline is
@@ -184,7 +188,7 @@ final class IntelligenceEngine: ObservableObject {
             // Skip any bout overlapping a real imported workout so import+wear users don't
             // double-count. sport = "detected"; energyKcal is the APPROXIMATE Keytel/BMR total.
             for s in night.workouts {
-                if importedWorkouts.contains(where: { s.start < $0.endTs && $0.startTs < s.end }) { continue }
+                if realWorkouts.contains(where: { s.start < $0.endTs && $0.startTs < s.end }) { continue }
                 workoutRows.append(WorkoutRow(startTs: s.start, endTs: s.end,
                                               sport: "detected", source: computedId,
                                               durationS: s.durationS, energyKcal: s.caloriesKcal,

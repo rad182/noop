@@ -249,6 +249,21 @@ interface WhoopDao {
     @Query("DELETE FROM workout WHERE deviceId = :deviceId AND sport = :sport AND startTs >= :from AND startTs <= :to")
     suspend fun deleteWorkoutsBySport(deviceId: String, sport: String, from: Long, to: Long)
 
+    /** Delete ONE workout by its full natural key (deviceId, startTs, sport). Used by the Workouts
+     *  screen to remove a single manual / re-labelled session. (#107) */
+    @Query("DELETE FROM workout WHERE deviceId = :deviceId AND startTs = :startTs AND sport = :sport")
+    suspend fun deleteWorkoutByKey(deviceId: String, startTs: Long, sport: String)
+
+    // MARK: - Dismissed detected bouts (durable #107 marker; survives engine re-detection)
+
+    /** Record a dismissed detected bout. IGNORE so re-dismissing the same bout is a no-op. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDismissed(rows: List<DismissedWorkout>)
+
+    /** All dismissed markers for a [deviceId] (the computed "<id>-noop" source the detector writes). */
+    @Query("SELECT * FROM dismissedWorkout WHERE deviceId = :deviceId")
+    suspend fun dismissedWorkouts(deviceId: String): List<DismissedWorkout>
+
     // MARK: - Frontier / stats (Reads.swift)
 
     /** Max HR sample ts for a device, or null if none — the biometric data frontier. */

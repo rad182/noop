@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "1.78"
+    static let currentVersion = "1.79"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,14 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "1.79",
+            title: "Manual workouts, edit/dismiss auto-detected ones, and CSV export",
+            date: "June 2026",
+            items: [
+                "New (Mac and Android): add a workout by hand, and edit, re-label, or dismiss the ones NOOP auto-detects — so a misread bout or a duplicate no longer sticks around with no way to remove it. Dismissals are remembered, so a re-detected session stays hidden.",
+                "New (Mac and Android): export all your data as a WHOOP-format CSV bundle (cycles, sleeps, workouts, journal) from Settings — yours to keep, and it imports straight back into NOOP.",
+            ]),
         Release(
             version: "1.78",
             title: "Fewer false daytime sleeps + an Android sync button",

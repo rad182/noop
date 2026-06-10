@@ -182,14 +182,97 @@ final class Repository: ObservableObject {
             to: Self.dayString(now.addingTimeInterval(86_400)))) ?? []
     }
 
-    /// All workouts (Whoop + Apple Health), newest first.
+    /// All workouts (Whoop + Apple Health + on-device detected bouts), newest first.
+    ///
+    /// Detected bouts are surfaced with an honest "Detected" badge so the user can see — and
+    /// dismiss or re-label — a duplicate the auto-detector created (#107). Dismissed detected spans
+    /// are filtered HERE so every consumer (Workouts screen, Today, Coach context) agrees: the engine
+    /// re-derives the detected rows each run, so a plain delete would resurrect them; the dismissed
+    /// span list is the durable "not a workout" record.
     func workoutRows(days: Int = 4000) async -> [WorkoutRow] {
         guard let store = await ensureStore() else { return [] }
         let now = Int(Date().timeIntervalSince1970)
         let lo = now - days * 86_400, hi = now + 86_400
         var rows = (try? await store.workouts(deviceId: deviceId, from: lo, to: hi, limit: 5000)) ?? []
         rows += (try? await store.workouts(deviceId: "apple-health", from: lo, to: hi, limit: 5000)) ?? []
-        return rows.sorted { $0.startTs > $1.startTs }
+        rows += (try? await store.workouts(deviceId: computedDeviceId, from: lo, to: hi, limit: 5000)) ?? []
+        let spans = WorkoutSource.parseDismissedSpans(dismissedDetectedSpans)
+        return rows.filter { !WorkoutSource.isDismissed($0, spans: spans) }
+            .sorted { $0.startTs > $1.startTs }
+    }
+
+    // MARK: - Workout editing (manual add/edit · relabel · dismiss · delete)
+    //
+    // Manual workouts live under the strap source (deviceId == `deviceId`, source "manual") — the same
+    // place v1.67's live-tracked sessions already land (AppModel.endWorkout). Detected bouts live under
+    // the computed `computedDeviceId` with sport "detected" and are wiped + re-derived each engine run,
+    // so the only durable way to keep one hidden after a re-detect is the dismissed-span list below.
+
+    /// The persisted dismissed detected spans ("startTs:endTs"). Read straight off UserDefaults so the
+    /// read path and the write path share one source of truth (the engine never sees this — it always
+    /// re-derives; only the read filter and these mutators consult it).
+    private var dismissedDetectedSpans: [String] {
+        get { UserDefaults.standard.stringArray(forKey: WorkoutSource.dismissedDefaultsKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: WorkoutSource.dismissedDefaultsKey) }
+    }
+
+    /// Persist a retroactive / edited manual workout under the strap source. `replacing` is the row the
+    /// edit started from:
+    ///  - editing a DETECTED bout ("Edit details…") replaces it with this manual row — the detected
+    ///    original is dismissed durably so the re-detector doesn't bring it back (else both would show);
+    ///  - editing a MANUAL row whose natural key (startTs/sport) changed deletes the stale strap row
+    ///    first (the (deviceId, startTs, sport) PK upsert would otherwise orphan it);
+    ///  - an IMPORTED row is never passed here as `replacing` (duplicating one is a pure add), so its
+    ///    history is never touched.
+    func saveManualWorkout(_ row: WorkoutRow, replacing old: WorkoutRow? = nil) async {
+        guard let store = await ensureStore() else { return }
+        if let old, WorkoutSource.classify(old.source) == .detected {
+            await dismissDetected(old)
+        } else if let old, old.startTs != row.startTs || old.sport != row.sport {
+            _ = try? await store.deleteWorkouts(deviceId: deviceId, sport: old.sport,
+                                                from: old.startTs, to: old.startTs)
+        }
+        _ = try? await store.upsertWorkouts([row], deviceId: deviceId)
+    }
+
+    /// Re-label a detected bout: copy it to a manual strap row with the chosen sport, then delete the
+    /// detected original. This survives analyzeRecent — the engine wipes + re-derives only sport
+    /// "detected" rows under the computed id AND skips any re-derived bout overlapping a real strap
+    /// workout, which this copy now is — so the same session is never re-created as a duplicate. (#107)
+    func relabelDetected(_ row: WorkoutRow, sport: String) async {
+        guard let store = await ensureStore() else { return }
+        let trimmed = sport.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let manual = WorkoutRow(startTs: row.startTs, endTs: row.endTs, sport: trimmed, source: "manual",
+                                durationS: row.durationS, energyKcal: row.energyKcal,
+                                avgHr: row.avgHr, maxHr: row.maxHr, strain: row.strain,
+                                distanceM: row.distanceM, zonesJSON: row.zonesJSON, notes: row.notes)
+        _ = try? await store.upsertWorkouts([manual], deviceId: deviceId)
+        _ = try? await store.deleteWorkouts(deviceId: computedDeviceId, sport: "detected",
+                                            from: row.startTs, to: row.startTs)
+    }
+
+    /// Dismiss a DETECTED bout the user says isn't a workout. Records its span in the durable dismissed
+    /// list (so a re-detect that recreates the same span stays hidden) AND deletes the current row so it
+    /// disappears immediately. Idempotent: a span already present isn't duplicated. (#107)
+    func dismissDetected(_ row: WorkoutRow) async {
+        guard WorkoutSource.classify(row.source) == .detected else { return }
+        let token = WorkoutSource.dismissedToken(for: row)
+        var spans = dismissedDetectedSpans
+        if !spans.contains(token) { spans.append(token); dismissedDetectedSpans = spans }
+        guard let store = await ensureStore() else { return }
+        _ = try? await store.deleteWorkouts(deviceId: computedDeviceId, sport: row.sport,
+                                            from: row.startTs, to: row.startTs)
+    }
+
+    /// Delete ONE workout by natural key. The read model has no deviceId, so reconstruct it from the
+    /// source: detected rows live under the computed id (and also get their span dismissed so they don't
+    /// come back); everything else the screen can delete (manual) lives under the strap id.
+    func deleteWorkout(_ row: WorkoutRow) async {
+        if WorkoutSource.classify(row.source) == .detected { await dismissDetected(row); return }
+        guard let store = await ensureStore() else { return }
+        _ = try? await store.deleteWorkouts(deviceId: deviceId, sport: row.sport,
+                                            from: row.startTs, to: row.startTs)
     }
 
     /// Apple Health daily aggregates (steps/energy/vo2/hr).
