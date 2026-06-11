@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "1.91"
+    const val CURRENT_VERSION = "1.92"
 
     data class Release(
         val version: String,
@@ -36,6 +36,14 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "1.92",
+            title = "Better diagnostics for newer strap firmware — so we can decode it",
+            date = "June 2026",
+            items = listOf(
+                "Improved (Mac and Android): when your strap's historical records use a firmware layout NOOP can't decode yet — newer WHOOP 5.0/MG units, and some WHOOP 4.0 straps, which is why sleep, recovery and steps can be missing (see #30, #136) — the strap log now includes the full record bytes (it previously cut them off after 64) plus a few more sample records. That's exactly what we need to map the new layout, so a single fresh strap log from an affected device now carries everything required for us to add support.",
+            ),
+        ),
         Release(
             version = "1.91",
             title = "Run the AI Coach on your own model — including fully local",

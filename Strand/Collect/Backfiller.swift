@@ -195,11 +195,14 @@ final class Backfiller {
             // raw bytes with no log line at all (only the all-empty case was observable). (ryanbr, PR #123)
             if !rejected.isEmpty {
                 log?("Backfill: \(rejected.count) undecodable sensor record(s) of \(frames.count) frame(s) (trim=\(trim)) — archiving raw bytes before ack (CRC/unmapped layout).")
-                // #91: dump a hex sample of the genuine rejects so an unmapped firmware's record layout
-                // can be mapped from a user's strap log.
-                for (i, f) in rejected.prefix(3).enumerated() {
-                    let hex = f.prefix(64).map { String(format: "%02x", $0) }.joined()
-                    log?("Backfill: rejected frame[\(i)] \(f.count)B: \(hex)\(f.count > 64 ? "…" : "")")
+                // #91 / #30: dump a hex sample of the genuine rejects so an unmapped firmware's record
+                // layout can be mapped from a user's strap log. Dump the FULL frame (not a 64-byte
+                // prefix — v25/v26 records run ~84 B and the truncated tail is exactly where the
+                // unmapped motion/HR fields sit), and sample a few more so one log carries enough
+                // records to triangulate offsets. These only ever fire for unmapped firmware.
+                for (i, f) in rejected.prefix(8).enumerated() {
+                    let hex = f.map { String(format: "%02x", $0) }.joined()
+                    log?("Backfill: rejected frame[\(i)] \(f.count)B: \(hex)")
                 }
             }
             // Commit the decoded rows FIRST (durable). Doing this before the reject archive means a

@@ -199,11 +199,14 @@ class Backfiller(
                     "Backfill: WARNING ${rejected.size} record frame(s) decoded to 0 rows " +
                         "(trim=$trim) — archiving raw bytes before ack (CRC/unmapped layout)",
                 )
-                // #91: a hex sample in the strap log so an unmapped firmware's record layout can be
-                // mapped from a shared log — now guaranteed to be actual record frames, not console text.
-                rejected.take(3).forEachIndexed { i, f ->
-                    val hex = f.take(64).joinToString("") { "%02x".format(it) }
-                    log("Backfill: rejected frame[$i] ${f.size}B: $hex${if (f.size > 64) "…" else ""}")
+                // #91 / #30: a hex sample in the strap log so an unmapped firmware's record layout can
+                // be mapped from a shared log. Dump the FULL frame (not a 64-byte prefix — v25/v26
+                // records run ~84 B and the truncated tail is exactly where the unmapped motion/HR
+                // fields sit), and sample a few more so one log carries enough records to triangulate
+                // offsets. These only ever fire for unmapped firmware.
+                rejected.take(8).forEachIndexed { i, f ->
+                    val hex = f.joinToString("") { "%02x".format(it) }
+                    log("Backfill: rejected frame[$i] ${f.size}B: $hex")
                 }
                 // Archive must be durable BEFORE the ack. A false return means a genuine write failure
                 // (NOT the archive-full case, which returns true) — hold the cursor/ack so the strap

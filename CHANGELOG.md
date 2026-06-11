@@ -17,6 +17,17 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 1.92 — Better diagnostics for newer strap firmware — so we can decode it
+
+- **Improved (Mac and Android):** when your strap's historical records use a firmware layout NOOP
+  can't decode yet — newer WHOOP 5.0/MG units, and some WHOOP 4.0 straps, which is why sleep, recovery
+  and steps can be missing (see #30, #136) — the strap log now includes the **full record bytes** (it
+  previously cut them off after 64) plus a few more sample records. That's exactly what we need to map
+  the new layout, so a single fresh strap log from an affected device now carries everything required
+  for us to add support.
+
+---
+
 ## 1.91 — Run the AI Coach on your own model — including fully local
 
 - **New (Mac and Android):** the AI Coach can now talk to any OpenAI-compatible server — including a
