@@ -137,6 +137,10 @@ struct ManualWorkoutSheet: View {
             Text(unit).font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
+        // Fill the field column so the Avg HR / Calories boxes share an identical width — left to
+        // their intrinsic size the two boxes rendered unequal (the "bpm"/"kcal" units differ in
+        // length), so the side-by-side row read as lopsided (#234).
+        .frame(maxWidth: .infinity)
         .background(StrandPalette.surfaceInset, in: inputShape)
         .overlay(inputShape.strokeBorder(StrandPalette.hairline, lineWidth: 1))
     }

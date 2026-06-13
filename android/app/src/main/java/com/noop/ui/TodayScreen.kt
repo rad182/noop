@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Battery5Bar
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Icon
@@ -218,7 +220,52 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         )
     }
 
+    // Consecutive run of nights with a banked sleep total, counting back from the logical day —
+    // a small "kept the strap on" streak shown beside the live battery in the header. Honest: it
+    // counts only days that actually recorded sleep, and tolerates today not being scored yet by
+    // starting from yesterday. Recomputes when the history window changes.
+    val nightStreakLen = remember(days, todayDate) { nightStreak(days, todayDate) }
+
     ScreenScaffold(title = "Control Center", subtitle = "Your day, read in full") {
+        // Live battery (when connected) + the recorded-nights streak, right-aligned above the day
+        // selector. Both icons carry a spoken contentDescription so the row reads cleanly aloud.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (live.connected && live.batteryPct != null) {
+                val batteryPct = live.batteryPct!!.roundToInt()
+                Icon(
+                    Icons.Filled.Battery5Bar,
+                    contentDescription = "Strap battery $batteryPct percent",
+                    tint = Palette.textTertiary,
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    "$batteryPct%",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(start = Metrics.space2, end = Metrics.space12),
+                )
+            }
+            if (nightStreakLen > 0) {
+                val streakColor = if (nightStreakLen >= 2) Palette.statusCritical else Palette.textTertiary
+                Icon(
+                    Icons.Filled.LocalFireDepartment,
+                    contentDescription = "$nightStreakLen night recording streak",
+                    tint = streakColor,
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    "$nightStreakLen",
+                    style = NoopType.footnote,
+                    color = streakColor,
+                    modifier = Modifier.padding(start = Metrics.space2),
+                )
+            }
+        }
+
         // One-time "New here?" card pointing at the scoring guide — dismissible, shown until the
         // user opens the guide OR closes it, after which ScoringGuidePrefs keeps it gone for good.
         if (!scoringCardSeen) {
@@ -403,7 +450,7 @@ private fun ScoringGuideIntroCard(onOpen: () -> Unit, onDismiss: () -> Unit) {
 
 @Composable
 private fun DaySelectorBar(selectedOffset: Int, onSelect: (Int) -> Unit) {
-    ThreeDaySelectorBar(selectedOffset = selectedOffset, onSelect = onSelect)
+    DayNavBar(selectedOffset = selectedOffset, onSelect = onSelect)
 }
 
 @Composable
@@ -1242,3 +1289,21 @@ private fun workoutCaption(row: WorkoutRow): String {
 
 private fun grouped(value: Int): String =
     String.format(Locale.US, "%,d", value)
+
+/**
+ * Length of the current run of consecutive nights (ending at [anchor]) that banked a sleep total.
+ * If [anchor] itself has no recorded sleep yet — common before the morning offload — the count
+ * starts from the previous day so the streak doesn't read 0 mid-morning. Returns 0 when neither
+ * the anchor nor the day before it recorded sleep.
+ */
+internal fun nightStreak(days: List<DailyMetric>, anchor: LocalDate): Int {
+    val recorded = days.filter { (it.totalSleepMin ?: 0.0) > 0.0 }.map { it.day }.toHashSet()
+    if (recorded.isEmpty()) return 0
+    var cursor = if (anchor.toString() in recorded) anchor else anchor.minusDays(1)
+    var streak = 0
+    while (cursor.toString() in recorded) {
+        streak++
+        cursor = cursor.minusDays(1)
+    }
+    return streak
+}

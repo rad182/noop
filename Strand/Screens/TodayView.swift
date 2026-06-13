@@ -45,6 +45,12 @@ struct TodayView: View {
     // Today's heart rate as 5-minute bucket means (midnight → now), for the 24h trend chart.
     @State private var hrPoints: [TrendPoint] = []
 
+    // Day navigation — 0 = today (the logical day), 1 = yesterday, … The DayNavBar chevrons and date
+    // jump drive this, and every day-scoped read-out (hero synthesis, the Key-Metrics tiles, the HR
+    // trend and Rest score) resolves to the selected day instead of always showing today. Mirrors the
+    // Android TodayScreen.selectedDayOffset. Loads re-run when this changes (see .task(id:)).
+    @State private var selectedDayOffset = 0
+
     // Support sheet (donate + contact) — always reachable from the home toolbar.
     @State private var showingSupport = false
 
@@ -63,15 +69,36 @@ struct TodayView: View {
     // THE single grid definition — every tile group reuses it so margins line up.
     private let grid = [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)]
 
+    /// The logical day the selector resolves to: offset 0 is today's logical day (rolls at 04:00 like
+    /// `repo.today`), past offsets count back from it. Presentation-only — used to pick which stored row
+    /// is on screen and to anchor the HR-trend window. Mirrors Android TodayScreen.selectedDay.
+    private var selectedLogicalDay: Date {
+        let base = Repository.logicalDay(Date())
+        return Calendar.current.date(byAdding: .day, value: -selectedDayOffset, to: base) ?? base
+    }
+    private var selectedDayKey: String { Repository.localDayKey(selectedLogicalDay) }
+
+    /// The DailyMetric shown for the selected day. Offset 0 prefers the live `repo.today` (so the small
+    /// hours after midnight still show the logical day's banked row), past offsets look the stored row up
+    /// by key. nil when no row exists for that day — every read-out then renders its honest empty state.
+    private var displayDay: DailyMetric? {
+        if selectedDayOffset == 0 {
+            return repo.today ?? repo.days.last(where: { $0.day == selectedDayKey })
+        }
+        return repo.days.last(where: { $0.day == selectedDayKey })
+    }
+
     /// Recovery cold-start: recovery is nil until the HRV baseline crosses the seed gate
     /// (Baselines.minNightsSeed valid nights). While calibrating, this is the count of nights
     /// banked so far — it drives an honest "Calibrating — N of 4 nights" on the recovery ring,
     /// the synthesis card and the Key Metrics tile instead of a bare empty state. It self-clears
     /// the moment recovery populates, and never claims "calibrating" at/above the seed gate.
-    /// Mirrors Android TodayScreen.recoveryCalibrationNights (7b5f212).
+    /// Mirrors Android TodayScreen.recoveryCalibrationNights (7b5f212). Only meaningful for today —
+    /// a past day with no recovery is missing data, not mid-calibration, so navigated days return nil.
     private var recoveryCalibration: Int? {
-        RecoveryScorer.calibrationNights(nightlyHrv: repo.days.map(\.avgHrv),
-                                         hasRecovery: repo.today?.recovery != nil)
+        guard selectedDayOffset == 0 else { return nil }
+        return RecoveryScorer.calibrationNights(nightlyHrv: repo.days.map(\.avgHrv),
+                                                hasRecovery: repo.today?.recovery != nil)
     }
 
     /// Synthesis-card copy while the recovery baseline calibrates; nil otherwise. Built as
@@ -88,7 +115,11 @@ struct TodayView: View {
         ScreenScaffold(title: "Control Center", subtitle: "\(dateLine)") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 HealthAlertBanner()
-                if repo.today?.recovery == nil {
+                // Browse past days — chevrons + a date jump capped at today (no future days).
+                DayNavBar(selectedOffset: selectedDayOffset) { selectedDayOffset = $0 }
+                // The "still building" and "new here?" prompts are about getting today's scores going,
+                // so they stay anchored to today rather than reappearing on every navigated past day.
+                if selectedDayOffset == 0 && repo.today?.recovery == nil {
                     // While the strap is mid-offload, say so — empty tiles read as final otherwise (#77).
                     if live.backfilling { SyncingHistoryNote(chunks: live.syncChunksThisSession) }
                     DataPendingNote(
@@ -97,7 +128,7 @@ struct TodayView: View {
                     )
                 }
                 // One-time pointer to the scoring guide, shown once scores exist.
-                if repo.today?.recovery != nil && !scoringGuideCardSeen {
+                if selectedDayOffset == 0 && repo.today?.recovery != nil && !scoringGuideCardSeen {
                     scoringGuideFirstRunCard
                 }
                 heroSection
@@ -110,7 +141,9 @@ struct TodayView: View {
                 sourcesSection
             }
         }
-        .task(id: repo.refreshSeq) { await loadAll() }
+        // Reload when the data refreshes OR the selected day changes — the HR trend and Rest score are
+        // day-scoped, so navigating must re-fetch them for the newly selected window.
+        .task(id: TodayLoadKey(seq: repo.refreshSeq, offset: selectedDayOffset)) { await loadAll() }
         .toolbar {
             ToolbarItem {
                 Button { showingSupport = true } label: {
@@ -270,10 +303,10 @@ struct TodayView: View {
 
     @ViewBuilder
     private var heroSection: some View {
-        let d = repo.today
+        let d = displayDay
         let score = d?.recovery
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Today’s Synthesis", overline: "At a glance",
+            SectionHeader(synthesisTitle, overline: "At a glance",
                           trailing: greetingWord)
             HStack(alignment: .top, spacing: NoopMetrics.gap) {
                 // Left: the signature ring in a card. When recovery is nil the ring's own center
@@ -320,14 +353,16 @@ struct TodayView: View {
                 // in Today's Synthesis (#186).
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-                // Right: the plain-English read-out, equal width and height.
+                // Right: the plain-English read-out, equal width and height. Both hero cards share
+                // the same .center frame alignment so they sit in lockstep — the read-out card used
+                // .leading while the ring used .center, leaving the pair subtly misaligned (#234).
                 InsightCard(
                     category: "Charge",
                     status: calibrationStatus ?? "\(synthesisWord(score))",
                     detail: calibrationDetail ?? "\(synthesisDetail(d))",
                     statusColor: score.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textTertiary
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
     }
@@ -343,10 +378,10 @@ struct TodayView: View {
         if hrPoints.count > 1 {
             let v = hrPoints.map(\.value)
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                SectionHeader("Heart Rate", overline: "Today")
+                SectionHeader("Heart Rate", overline: "\(selectedDayOverline)")
                 ChartCard(
                     title: "Beats per minute",
-                    subtitle: "5-minute average · since midnight",
+                    subtitle: selectedDayOffset == 0 ? "5-minute average · since midnight" : "5-minute average · selected day",
                     trailing: v.last.map { "\(Int($0.rounded())) bpm" }
                 ) {
                     TrendChart(
@@ -381,10 +416,10 @@ struct TodayView: View {
 
     @ViewBuilder
     private var metricsSection: some View {
-        let d = repo.today
+        let d = displayDay
         let aLatest = appleDays.last
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Key Metrics", overline: "Today", trailing: "14-day trend")
+            SectionHeader("Key Metrics", overline: "\(selectedDayOverline)", trailing: "14-day trend")
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 StatTile(
                     label: "Charge",
@@ -659,18 +694,24 @@ struct TodayView: View {
         // composite and an importer sees the export's figure — exactly like the Rest detail screen.
         let restSeries = await repo.exploreSeries(key: "sleep_performance", source: "my-whoop")
         let restByDay = Dictionary(restSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
-        restScore = restByDay[Repository.logicalDayKey(Date())] ?? restSeries.last?.value
+        // The selected day's Rest, falling back to the series tail only when today itself is selected —
+        // a navigated past day with no Rest row shows "—" rather than borrowing the newest value.
+        restScore = restByDay[selectedDayKey] ?? (selectedDayOffset == 0 ? restSeries.last?.value : nil)
 
         workouts = await repo.workoutRows()
         appleDays = await repo.appleDailyRows()
 
-        // Today's HR trend — 5-minute bucket means from the LOGICAL day's local midnight → now. The
-        // logical day rolls at 04:00 (Repository.logicalDayStart), so in the small hours after midnight
-        // the window still starts at yesterday's midnight and the chart keeps the evening's curve rather
-        // than blanking to an empty new-calendar-day axis (#144).
-        let startOfToday = Int(Repository.logicalDayStart(Date()).timeIntervalSince1970)
-        let nowTs = Int(Date().timeIntervalSince1970)
-        hrPoints = await repo.hrBuckets(from: startOfToday, to: nowTs, bucketSeconds: 300)
+        // HR trend for the SELECTED day — 5-minute bucket means from that logical day's local midnight.
+        // For today the window runs to now (an in-progress curve); for a navigated past day it runs the
+        // full 24h to the next midnight. The logical day rolls at 04:00 (Repository.logicalDayStart), so
+        // in the small hours after midnight today still starts at yesterday's midnight rather than
+        // blanking to an empty new-calendar-day axis (#144).
+        let dayStart = Calendar.current.startOfDay(for: selectedLogicalDay)
+        let windowStart = Int(dayStart.timeIntervalSince1970)
+        let windowEnd: Int = selectedDayOffset == 0
+            ? Int(Date().timeIntervalSince1970)
+            : Int((Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart).timeIntervalSince1970)
+        hrPoints = await repo.hrBuckets(from: windowStart, to: windowEnd, bucketSeconds: 300)
             .map { TrendPoint(date: Date(timeIntervalSince1970: TimeInterval($0.ts)), value: $0.bpm) }
     }
 
@@ -731,10 +772,33 @@ struct TodayView: View {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "EEEE, d MMMM"
-        if let day = repo.today?.day, let date = Self.dayParser.date(from: day) {
+        // The selected day's date when navigated; today's banked-row date (or today) at offset 0.
+        if selectedDayOffset == 0, let day = repo.today?.day, let date = Self.dayParser.date(from: day) {
             return f.string(from: date)
         }
-        return f.string(from: Date())
+        return f.string(from: selectedLogicalDay)
+    }
+
+    /// Hero title that names the selected day — "Today's"/"Yesterday's"/"Day's" Synthesis.
+    private var synthesisTitle: LocalizedStringKey {
+        switch selectedDayOffset {
+        case 0:  return "Today’s Synthesis"
+        case 1:  return "Yesterday’s Synthesis"
+        default: return "Synthesis"
+        }
+    }
+
+    /// Section overline naming the selected day — "Today"/"Yesterday"/"EEE d MMM".
+    private var selectedDayOverline: String {
+        switch selectedDayOffset {
+        case 0:  return "Today"
+        case 1:  return "Yesterday"
+        default:
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "EEE d MMM"
+            return f.string(from: selectedLogicalDay)
+        }
     }
 
     /// A short recovery state word for the synthesis hero.
@@ -844,6 +908,13 @@ struct TodayView: View {
         f.dateFormat = "HH:mm"
         return f
     }()
+}
+
+/// `.task(id:)` key combining the data refresh sequence with the selected day so a reload runs on
+/// either a data change or a day-navigation change (the HR trend + Rest score are day-scoped).
+private struct TodayLoadKey: Equatable {
+    let seq: Int
+    let offset: Int
 }
 
 // MARK: - Preview
