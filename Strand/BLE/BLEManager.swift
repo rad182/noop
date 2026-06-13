@@ -277,6 +277,9 @@ public final class BLEManager: NSObject, ObservableObject {
         central = CBCentralManager(delegate: self, queue: .main)
         // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
         router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
+        // Strap firmware (REPORT_VERSION_INFO at connect) → one strap-log line; the export header
+        // shows it too. Identifies which firmware-specific quirks apply (#120).
+        router.onFirmwareVersion = { [weak self] fw in self?.log("Strap firmware: \(fw)") }
     }
 
     /// Build the WhoopStore + Collector + Backfiller asynchronously. Safe to call multiple
@@ -341,6 +344,9 @@ public final class BLEManager: NSObject, ObservableObject {
         central = CBCentralManager(delegate: self, queue: .main)
         // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
         router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
+        // Strap firmware (REPORT_VERSION_INFO at connect) → one strap-log line; the export header
+        // shows it too. Identifies which firmware-specific quirks apply (#120).
+        router.onFirmwareVersion = { [weak self] fw in self?.log("Strap firmware: \(fw)") }
     }
 
     // MARK: Public API
@@ -810,7 +816,7 @@ public final class BLEManager: NSObject, ObservableObject {
             if stuck {
                 log("Watchdog: behind + frontier frozen — recovery (exit high-freq + SET_CLOCK)")
                 send(.exitHighFreqSync, payload: [0x00])
-                send(.setClock, payload: BLEManager.setClockPayload())
+                sendSetClockBothForms()
             }
         }
     }
@@ -1100,7 +1106,7 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         // Clamp rather than trap: an out-of-range alarm date (pre-1970 / post-2106) must not crash.
         let epochSec = UInt32(clamping: Int64(date.timeIntervalSince1970))
-        send(.setClock, payload: BLEManager.setClockPayload())
+        sendSetClockBothForms()
         send(.setAlarmTime, payload: WhoopCommand.setAlarmPayload(epochSec: epochSec))
         log("Alarm: armed for \(localFmt.string(from: date)) — your local wake time (sent as UTC epoch \(epochSec))")
     }
@@ -1531,13 +1537,23 @@ extension BLEManager: CBPeripheralDelegate {
         // (PHASE A = 50 records; PHASE B high-freq = 0). We still exchange hello to mirror WHOOP exactly.
         send(.getHelloHarvard)
         send(.getAdvertisingNameHarvard)
-        send(.setClock, payload: BLEManager.setClockPayload())
+        send(.reportVersionInfo)   // strap firmware → log + export header; protocol quirks are
+                                   // firmware-specific (the SET_CLOCK/GET_CLOCK lengths below, #120)
+        sendSetClockBothForms()
         if clockRef == nil && !clockRequested {
             clockRequested = true
-            send(.getClock, payload: [])   // the strap expects GET_CLOCK with an EMPTY payload;
-                                           // the app's old default [0x00] is a wrong length the strap ignores.
-                                           // (Offload no longer depends on this — Backfiller falls back to an
-                                           // identity clockRef — but a real correlation helps realtime decode.)
+            // GET_CLOCK's payload length is firmware-specific, exactly like SET_CLOCK's: newer
+            // firmware answers the EMPTY form and ignores [0x00]; fw 41.17.x answers [0x00] and
+            // ignores the empty form (hardware-verified — see docs/BLE_REVERSE_ENGINEERING.md
+            // §SET_CLOCK). Send both: the strap answers whichever its firmware accepts, and the
+            // `clockRef == nil` correlation guard makes a second reply a no-op. Without the [0x00]
+            // form, correlation never establishes on 41.17.x, so a lost RTC (the 1971 clock behind
+            // #120) stays invisible and ClockPolicy can never re-fix it. Both GET_CLOCKs ride
+            // behind both SET_CLOCKs above, so the reply reflects the already-corrected clock.
+            // (Offload doesn't depend on this — Backfiller falls back to an identity clockRef —
+            // but a real correlation drives realtime decode and the drift re-set.)
+            send(.getClock, payload: [])
+            send(.getClock, payload: [0x00])
         }
         send(.sendR10R11Realtime, payload: [0x00])   // stop the type-43 realtime flood (BLE airtime/battery)
         send(.getDataRange)                          // refresh the strap's stored range for the watchdog
@@ -1567,13 +1583,65 @@ extension BLEManager: CBPeripheralDelegate {
         }
     }
 
-    /// SET_CLOCK(10) payload = the strap's 8-byte form: [seconds u32 LE][subseconds
-    /// u32 LE], subseconds in 1/32768 s (0 is fine). NOT the old 9-byte [u32 + 5 pad] — a wrong-length
-    /// SET_CLOCK is ack-received but NOT latched, leaving the RTC lost so the strap won't serve type-47.
+    /// SET_CLOCK(10) payload — the 8-byte form `[seconds u32 LE][subseconds u32 LE]`, subseconds in
+    /// 1/32768 s (0 is fine). The payload LENGTH is firmware-specific and LOAD-BEARING
+    /// (docs/BLE_REVERSE_ENGINEERING.md §SET_CLOCK): newer WHOOP 4 firmware latches this form, but
+    /// fw 41.17.x ignores it outright — no COMMAND_RESPONSE, RTC unchanged — and latches only the
+    /// 9-byte form below. A strap that misses the set keeps an invalid RTC and stops saving sensor
+    /// data to flash entirely ("RTC timestamp … is invalid; not saving data to flash"), which
+    /// surfaces as endless console-only syncs and no sleep/recovery (#120). Always send through
+    /// sendSetClockBothForms() so either firmware latches.
     static func setClockPayload(now: UInt32 = UInt32(Date().timeIntervalSince1970)) -> [UInt8] {
         [UInt8(now & 0xFF), UInt8((now >> 8) & 0xFF),
          UInt8((now >> 16) & 0xFF), UInt8((now >> 24) & 0xFF),
          0, 0, 0, 0]
+    }
+
+    /// SET_CLOCK(10) payload — the legacy 9-byte form `[seconds u32 LE][5 zero]` REQUIRED by WHOOP 4
+    /// fw 41.17.x, which ignores the 8-byte form. Hardware-verified 2026-06-13 on a WHOOP 4.0
+    /// (fw 41.17.6.0) whose RTC was stuck in 1971: days of 8-byte sends across many connects drew no
+    /// response; the 9-byte form was ack'd (COMMAND_RESPONSE cmd 10), the clock latched and ticked
+    /// +1 s/s, and the strap resumed banking history to flash within 90 s. On newer firmware this
+    /// form is ack'd but NOT latched, so sending it after the 8-byte form is a no-op there — both
+    /// forms carry the same seconds, so whichever one latches sets the same time.
+    static func setClockPayloadLegacy(now: UInt32 = UInt32(Date().timeIntervalSince1970)) -> [UInt8] {
+        [UInt8(now & 0xFF), UInt8((now >> 8) & 0xFF),
+         UInt8((now >> 16) & 0xFF), UInt8((now >> 24) & 0xFF),
+         0, 0, 0, 0, 0]
+    }
+
+    /// Same gross-staleness bar as the historical-decode correction (FIX #72): beyond a day the
+    /// strap RTC isn't "drifted", it's LOST — and a strap with an invalid RTC stops banking sensor
+    /// data to flash entirely (#120).
+    static let clockLostThresholdSeconds = 86_400
+
+    /// Human-readable clock-correlation log line. The old raw `device=… wall=…` integers hid the
+    /// #120 failure mode in plain sight — a strap RTC reading 1971 looks like any other 10-digit
+    /// number unless the reader subtracts. Print the strap clock as a date with explicit drift,
+    /// and say out loud when the RTC is invalid. `timeZone` is injectable for tests only.
+    static func clockCorrelationLogLine(device: Int, wall: Int,
+                                        timeZone: TimeZone = .current) -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        df.timeZone = timeZone
+        let strapDate = df.string(from: Date(timeIntervalSince1970: TimeInterval(device)))
+        let drift = device - wall
+        let base = "Clock correlated: strap=\(strapDate) (drift \(drift >= 0 ? "+" : "")\(drift)s)"
+        guard abs(drift) > clockLostThresholdSeconds else { return base }
+        return base + " — RTC invalid/lost; an un-clocked strap banks no sensor data (#120). Re-clocking."
+    }
+
+    /// Send SET_CLOCK in every payload form the WHOOP 4 firmware family is known to accept (8-byte
+    /// for newer firmware, 9-byte for 41.17.x — each a no-op on the other). Both carry the same
+    /// `now`, so double-latching is harmless. WHOOP 5/MG keeps its single hardware-validated 8-byte
+    /// puffin send (the 5/MG connect path calls setClockPayload() directly; the 9-byte form is
+    /// unverified on that family), so the legacy form is gated to WHOOP 4.
+    func sendSetClockBothForms() {
+        let now = UInt32(Date().timeIntervalSince1970)
+        send(.setClock, payload: BLEManager.setClockPayload(now: now))
+        if selectedModel.deviceFamily == .whoop4 {
+            send(.setClock, payload: BLEManager.setClockPayloadLegacy(now: now))
+        }
     }
 
     /// Newest plausible-unix marker in a GET_DATA_RANGE COMMAND_RESPONSE = the strap's newest stored
@@ -1647,13 +1715,13 @@ extension BLEManager: CBPeripheralDelegate {
                         clockRef = ref
                         collector?.clockRef = ref                  // unblocks buffered persistence
                         backfiller?.clockRef = ref                 // unblocks historical chunk decode
-                        log("Clock correlated: device=\(ref.device) wall=\(ref.wall)")
+                        log(BLEManager.clockCorrelationLogLine(device: ref.device, wall: ref.wall))
                         // Conditional SET_CLOCK (mirrors WHOOP): only when the strap RTC has drifted /
                         // is frozen — not blindly every connect. Offload doesn't depend on this (it uses
                         // clockRef for decoding); SET_CLOCK only keeps FUTURE logging timestamps sane.
                         if ClockPolicy.shouldSetClock(deviceClock: ref.device, wallNow: ref.wall) {
                             log("Clock drift detected — issuing SET_CLOCK")
-                            send(.setClock, payload: BLEManager.setClockPayload())
+                            sendSetClockBothForms()
                         }
                     }
                 }

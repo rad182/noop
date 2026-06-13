@@ -24,6 +24,12 @@ public final class LiveState: ObservableObject {
     @Published public var heartRate: Int? = nil
     @Published public var rr: [Int] = []
     @Published public var batteryPct: Double? = nil
+    /// Strap firmware from REPORT_VERSION_INFO at connect ("harvard 41.17.6.0 / boylston 5.6.7.8").
+    /// Surfaced in the strap log AND the log-export header: protocol quirks are firmware-specific
+    /// (e.g. the SET_CLOCK/GET_CLOCK payload lengths, #120), so every shared log should identify
+    /// the firmware family it came from — the connect-time log line alone can rotate out of the
+    /// capped ring buffer, the header can't.
+    @Published public var firmwareVersion: String? = nil
     /// Charging flag from the strap's BATTERY_LEVEL events — wire observation: u8 bit0 in the
     /// event payload (4.0 @26 / 5.0 @30), pushed ~every 8 min on captured links. nil until the
     /// first event of a session; cleared on disconnect so a stale flag can't outlive the link.

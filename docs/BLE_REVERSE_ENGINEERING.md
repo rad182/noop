@@ -112,10 +112,14 @@ Once bonded, NOOP runs a WHOOP-faithful lifecycle exactly once
 (`didWriteValueFor` → handshake block):
 
 1. `GET_HELLO_HARVARD` (35) + `GET_ADVERTISING_NAME_HARVARD` (76) — greet the strap.
-2. `SET_CLOCK` (10) — set the strap RTC to UTC (8-byte `[seconds u32 LE][subseconds u32 LE]`).
-   A *wrong-length* SET_CLOCK is ack'd but not latched, which leaves the RTC lost and the strap
-   refuses to serve history — a real bug found and fixed here.
-3. `GET_CLOCK` (11) with an **empty** payload — establishes the device↔wall clock correlation.
+2. `SET_CLOCK` (10) — set the strap RTC to UTC, sent in **both** firmware payload forms (the 8-byte
+   `[seconds u32 LE][subseconds u32 LE]` newer firmware latches, then the 9-byte `[u32 + 5 zero]`
+   form fw 41.17.x requires — each is a no-op on the other; see *SET_CLOCK — the payload length is
+   firmware-specific* below). A *wrong-length* SET_CLOCK is ack'd-but-not-latched or ignored
+   outright, which leaves the RTC lost — and an un-clocked strap stops banking sensor data to
+   flash, so every sync completes console-only (a real bug found and fixed here, twice).
+3. `GET_CLOCK` (11), also in both firmware forms (an **empty** payload for newer firmware, `[0x00]`
+   for 41.17.x) — establishes the device↔wall clock correlation.
 4. `SEND_R10_R11_REALTIME` (63) with `[0x00]` — **disables** the raw realtime flood (see §4).
 5. `GET_DATA_RANGE` (34) — read the strap's stored data window for the liveness watchdog.
 6. After a short settle, request the historical offload (`SEND_HISTORICAL_DATA`).
@@ -648,12 +652,27 @@ firmware-specific and load-bearing** — a wrong length is `COMMAND_RESPONSE`-ac
 
 | Firmware | Body | Result |
 |---|---|---|
-| newer (app's default) | 8-byte `[u32 + 4 zero]` | latches on newer straps; on WHOOP 4 `41.17.6.0` → **no response at all** |
+| newer | 8-byte `[u32 + 4 zero]` | latches on newer straps; on WHOOP 4 `41.17.6.0` → **no response at all** |
 | older WHOOP 4 `41.17.6.0` | **9-byte** `[u32 + 5 zero]` | **latches** — COMMAND_RESPONSE(cmd 10) + the event clock jumps to the set time |
 
 **Verified on real hardware (2026-06-12, WHOOP 4C fw 41.17.6.0):** the 8-byte form drew no response;
 the 9-byte form latched and the strap's event RTC jumped from 1971 to the correct 2026 time, ticking
-+1/sec. So `build_whoop4_set_clock` sends the 9-byte form; newer firmware may want 8.
++1/sec. So `build_whoop4_set_clock` sends the 9-byte form — and **the macOS/iOS app sends both forms
+back-to-back** on every WHOOP 4 clock set (`BLEManager.sendSetClockBothForms`): each form is a no-op
+on the firmware that doesn't accept it and both carry the same seconds, so the set self-selects with
+no firmware sniffing. (WHOOP 5/MG keeps its single hardware-validated 8-byte puffin send. The Android
+client still sends only the 8-byte form — `WhoopBleClient.setClockPayload` — so this fix is pending
+the same parity port there.)
+
+The same length quirk applies to **GET_CLOCK (11)**: newer firmware answers the **empty** payload and
+ignores `[0x00]`; `41.17.6.0` answers `[0x00]` and ignores the empty form — so the connect handshake
+sends both. Without the `[0x00]` form the clock correlation can never establish on that firmware,
+which makes a lost RTC *invisible* to the app (no drift detection, no `ClockPolicy` re-set) at exactly
+the moment it most needs fixing. Re-verified on real hardware (2026-06-13, WHOOP 4.0 fw 41.17.6.0,
+RTC stuck in **1971** across four days of 8-byte-only connects): the 9-byte set was ack'd and latched
+(clock ticking +1 s/s), and `GET_DATA_RANGE`'s newest stored record jumped from the stale strap-clock
+era to the current minute within 90 seconds — the strap resumed banking the moment its RTC became
+valid.
 
 Read-back to confirm a latch: the strap's RTC is the u32 LE timestamp in any EVENT or REALTIME frame —
 **but the offset differs by type**: WHOOP 4.0 REALTIME(40) `@6`, EVENT(48) `@8`; WHOOP 5.0 (puffin, +4

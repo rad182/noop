@@ -415,8 +415,13 @@ struct LiveView: View {
         #else
         let osName = "macOS"
         #endif
+        // Strap firmware in the HEADER, not just the connect-time log line — the ring buffer is
+        // capped, so on a long session the handshake lines rotate out; the header always survives.
+        // Protocol quirks are firmware-specific (the SET_CLOCK/GET_CLOCK payload lengths, #120),
+        // so a shared log should always say which firmware it came from.
         let header = "NOOP strap log — \(osName)\nApp: \(v)\n\(osName): "
             + ProcessInfo.processInfo.operatingSystemVersionString + "\n"
+            + (live.firmwareVersion.map { "Strap firmware: \($0)\n" } ?? "")
             + String(repeating: "-", count: 40) + "\n"
         return header + live.log.joined(separator: "\n")
     }

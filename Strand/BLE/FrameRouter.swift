@@ -9,6 +9,11 @@ public final class FrameRouter {
     /// Called when the strap pushes an EVENT packet (WHOOP's strap-as-clock catch-up signal). The
     /// BLEManager wires this to a rate-limited requestSync(.strap). nil in pure/unit contexts.
     var onSyncTrigger: (() -> Void)?
+    /// Called once per (changed) REPORT_VERSION_INFO response with the firmware summary. The
+    /// BLEManager wires this to a strap-log line, so every shared log identifies the firmware
+    /// family — protocol quirks are firmware-specific (the SET_CLOCK/GET_CLOCK payload lengths,
+    /// #120). nil in pure/unit contexts.
+    var onFirmwareVersion: ((String) -> Void)?
     /// Which family's framing to decode with. Set per connection by BLEManager. WHOOP 5.0/MG frames
     /// use the CRC16/offset-8 envelope; the biometric field decode for puffin is still a stub, so
     /// WHOOP 5 custom frames currently surface only their envelope (live HR/battery come from the
@@ -45,6 +50,17 @@ public final class FrameRouter {
         case "COMMAND_RESPONSE":
             if let pct = parsed.parsed["battery_pct"]?.doubleValue {
                 state.setBattery(pct)
+            }
+            // REPORT_VERSION_INFO (requested once per connect): record the strap firmware and
+            // surface it in the strap log + export header. Guarded on change so a re-query
+            // (reconnect) can't spam the log with duplicate lines.
+            if let harvard = parsed.parsed["fw_harvard"]?.stringValue {
+                let boylston = parsed.parsed["fw_boylston"]?.stringValue
+                let summary = boylston.map { "harvard \(harvard) / boylston \($0)" } ?? "harvard \(harvard)"
+                if state.firmwareVersion != summary {
+                    state.firmwareVersion = summary
+                    onFirmwareVersion?(summary)
+                }
             }
 
         case "EVENT":
