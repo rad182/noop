@@ -168,12 +168,14 @@ private struct SidebarStatus: View {
         .background(StrandPalette.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
     }
 
+    // Shares LiveState.connectionStatus* with the Settings strap card so the two never disagree (#266):
+    // a connected-but-unbonded 5/MG now reads "Connected" here too, not a misleading "Connecting…".
     private var statusColor: Color {
-        live.bonded ? StrandPalette.statusPositive
-            : live.connected ? StrandPalette.statusWarning
+        live.connectionStatusIsActive ? StrandPalette.statusPositive
+            : live.connectionStatusIsIdle ? StrandPalette.statusWarning
             : StrandPalette.statusCritical
     }
     private var statusText: String {
-        live.bonded ? "WHOOP · Bonded" : live.connected ? "Connecting…" : "Disconnected"
+        live.connectionStatusLabel
     }
 }

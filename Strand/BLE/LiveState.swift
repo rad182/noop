@@ -45,6 +45,23 @@ public final class LiveState: ObservableObject {
     /// Rolling log of human-readable lines for the on-device verification checklist.
     @Published public var log: [String] = []
 
+    // MARK: - Connection status (single source of truth, #266)
+
+    /// Short connection-status label shared by the sidebar footer (RootView) and the Settings strap
+    /// card, so the two can't disagree the way they did in #266 (sidebar "Connecting…" vs Settings
+    /// "Connected" for the same connected-but-unbonded 5/MG link). Once the link is up and HR is
+    /// flowing — even over the unbonded standard profile — this reads "Connected", never "Connecting…".
+    public var connectionStatusLabel: String {
+        if connected && bonded { return "Bonded · streaming" }
+        if connected { return "Connected" }
+        if bonded { return "Bonded · idle" }
+        return "Disconnected"
+    }
+    /// True when the link is up (HR flowing) → status reads green. Drives the sidebar + Settings tone.
+    public var connectionStatusIsActive: Bool { connected }
+    /// True when previously paired but not currently connected → amber.
+    public var connectionStatusIsIdle: Bool { !connected && bonded }
+
     /// Fired (live only) when the strap reports a DOUBLE_TAP gesture. Wired by AppModel to the
     /// user's chosen action. Debounced in AppModel.
     public var onDoubleTap: (() -> Void)?

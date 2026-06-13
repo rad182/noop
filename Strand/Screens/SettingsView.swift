@@ -343,16 +343,12 @@ struct SettingsView: View {
         }
     }
 
-    private var strapStatusTitle: String {
-        if live.bonded && live.connected { return "Bonded · streaming" }
-        if live.connected { return "Connected" }
-        if live.bonded { return "Bonded · idle" }
-        return "Disconnected"
-    }
+    // Shares LiveState.connectionStatus* with the sidebar footer (RootView) so the two never drift (#266).
+    private var strapStatusTitle: String { live.connectionStatusLabel }
 
     private var strapTone: StrandTone {
-        if live.connected { return .positive }
-        if live.bonded { return .warning }
+        if live.connectionStatusIsActive { return .positive }
+        if live.connectionStatusIsIdle { return .warning }
         return .critical
     }
 
