@@ -41,6 +41,8 @@ public struct DayNavBar: View {
                 Image(systemName: "chevron.left")
                     .font(StrandFont.headline)
                     .foregroundStyle(StrandPalette.accent)
+                    .frame(width: 44, height: 44)        // ≥44pt hit target (HIG); glyph stays 17pt
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Previous day")
@@ -75,6 +77,8 @@ public struct DayNavBar: View {
                 Image(systemName: "chevron.right")
                     .font(StrandFont.headline)
                     .foregroundStyle(canGoNewer ? StrandPalette.accent : StrandPalette.textTertiary)
+                    .frame(width: 44, height: 44)        // ≥44pt hit target (HIG); glyph stays 17pt
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!canGoNewer)

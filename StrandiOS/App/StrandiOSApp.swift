@@ -44,12 +44,25 @@ struct StrandiOSApp: App {
                 .environmentObject(model.coach)
                 .environmentObject(health)
                 .preferredColorScheme(.dark)
+                // Dynamic Type now scales the prose/label roles (StrandFont). Cap the upper end so the
+                // fixed-geometry tiles/gauges stay legible at the largest accessibility sizes rather than
+                // clipping; the common Larger-Text range still scales fully.
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .onReceive(model.live.$heartRate) { _ in
                     liveActivity.update(
-                        bpm: model.bpm ?? model.live.heartRate,
+                        bpm: model.live.connected ? (model.bpm ?? model.live.heartRate) : nil,
                         recovery: model.repo.days.last(where: { $0.recovery != nil })?
                             .recovery.map { Int($0.rounded()) },
-                        bonded: model.live.bonded
+                        connected: model.live.connected
+                    )
+                }
+                // End the Live Activity the moment the link drops, even if no further HR tick arrives.
+                .onReceive(model.live.$connected) { isConnected in
+                    liveActivity.update(
+                        bpm: isConnected ? (model.bpm ?? model.live.heartRate) : nil,
+                        recovery: model.repo.days.last(where: { $0.recovery != nil })?
+                            .recovery.map { Int($0.rounded()) },
+                        connected: isConnected
                     )
                 }
         }
@@ -64,6 +77,9 @@ struct StrandiOSApp: App {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 model.drainPendingIntents()
+                // Re-arm the strap's smart alarm on foreground: the firmware alarm is a single instant
+                // and iOS can't re-arm it while suspended, so it would otherwise fire once and stop.
+                model.applySmartAlarm()
                 Task {
                     health.refreshAuthIfPreviouslyGranted()
                     await health.sync()
@@ -140,11 +156,18 @@ private struct iOSRootView: View {
                 showWhatsNew = false
             })
         }
-        .onAppear {
-            // Existing users who updated: their last-seen version is behind the current one.
-            if onboarded && lastSeenChangelog != AppChangelog.currentVersion {
-                showWhatsNew = true
-            }
+        // The Terms gate must stay "over everything" — don't pop What's New on top of it after a
+        // combined terms+version update. Gate on terms being current, and re-check when they're
+        // accepted (onAppear already fired before acceptance), so What's New shows right after.
+        .onAppear { showWhatsNewIfDue() }
+        .onChange(of: acceptedTerms) { _ in showWhatsNewIfDue() }
+    }
+
+    private func showWhatsNewIfDue() {
+        // Existing users who updated: their last-seen version is behind the current one.
+        if onboarded && acceptedTerms == Terms.currentVersion
+            && lastSeenChangelog != AppChangelog.currentVersion {
+            showWhatsNew = true
         }
     }
 }

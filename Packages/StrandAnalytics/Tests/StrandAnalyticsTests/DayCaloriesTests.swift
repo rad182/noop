@@ -18,11 +18,13 @@ final class DayCaloriesTests: XCTestCase {
             0.0, accuracy: 1e-12)
     }
 
-    func testDayCaloriesMatchesBoutFirst() {
-        // The day estimate must equal the kcal component of the per-bout model for the
-        // same samples (it delegates to estimateBoutCalories), so the two never diverge.
+    func testDayCaloriesMatchesBoutAtOneHz() {
+        // At a steady 1 Hz stream the day and bout estimators agree exactly: the bout path's
+        // elapsed-time weighting caps every ~1 s interval at 1 s, so it collapses to the day
+        // path's flat one-second-per-sample. (They DIVERGE on gappy streams — see
+        // testDayPathDoesNotOverCountGappyDays — but not here.)
         let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
-        let hr = hrDay(bpm: 130, n: 600)  // 10 min above the active threshold
+        let hr = hrDay(bpm: 130, n: 600)  // 10 min above the active threshold, dense 1 Hz
         let day = Calories.estimateDayCalories(hr, profile: profile, hrmax: 185.0, restingHR: 55.0)
         let bout = Calories.estimateBoutCalories(hr, profile: profile, hrmax: 185.0, restingHR: 55.0).0
         XCTAssertEqual(day, bout, accuracy: 1e-9)
@@ -39,6 +41,57 @@ final class DayCaloriesTests: XCTestCase {
                                                      hrmax: 185.0, restingHR: 55.0)
         XCTAssertGreaterThan(restingDay, 0.0, "resting day must burn > 0 (BMR floor)")
         XCTAssertGreaterThan(activeDay, restingDay, "active day must exceed resting day")
+    }
+
+    func testSparseHRTracksElapsedTimeNotSampleCount() {
+        // A 10-minute effort at a steady active HR, sampled two ways over the SAME ~600 s span:
+        // densely at 1 Hz, and sparsely at one sample / 10 s (the WHOOP 5/MG case). Energy must
+        // track elapsed time, so the sparse estimate lands close to the dense one — NOT ~1/10th
+        // of it, as the old one-second-per-sample count produced. (BOUT path only.)
+        let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
+        let dense = (0..<600).map { HRSample(ts: $0, bpm: 130) }
+        let sparse = stride(from: 0, to: 600, by: 10).map { HRSample(ts: $0, bpm: 130) }
+        let denseKcal = Calories.estimateBoutCalories(dense, profile: profile, hrmax: 185.0, restingHR: 55.0).0
+        let sparseKcal = Calories.estimateBoutCalories(sparse, profile: profile, hrmax: 185.0, restingHR: 55.0).0
+        XCTAssertEqual(sparseKcal, denseKcal, accuracy: denseKcal * 0.05,
+                       "sparse HR must be counted over elapsed time, not undercounted per sample")
+        // Teeth: a per-sample count (60 samples) would be ~1/10th of the dense total.
+        XCTAssertGreaterThan(sparseKcal, denseKcal * 0.5)
+    }
+
+    func testWearGapIsCappedNotCreditedInFull() {
+        // Two active samples an hour apart must NOT credit a full hour of active burn — the
+        // per-sample interval is capped at mergeGapS (150 s). The pre-gap sample contributes
+        // 150 s and the tail 1 s, so the total equals a 151 s continuous equivalent, not 3600 s.
+        // (BOUT path only.)
+        let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
+        let gapped = [HRSample(ts: 0, bpm: 130), HRSample(ts: 3600, bpm: 130)]
+        let cappedEquiv = (0...150).map { HRSample(ts: $0, bpm: 130) }   // 151 s continuous
+        let gappedKcal = Calories.estimateBoutCalories(gapped, profile: profile, hrmax: 185.0, restingHR: 55.0).0
+        let equivKcal = Calories.estimateBoutCalories(cappedEquiv, profile: profile, hrmax: 185.0, restingHR: 55.0).0
+        XCTAssertEqual(gappedKcal, equivKcal, accuracy: equivKcal * 0.001,
+                       "an inter-sample gap must be capped at mergeGapS, not credited in full")
+    }
+
+    func testDayPathDoesNotOverCountGappyDays() {
+        // The WHOLE-DAY estimator must STAY on one-second-per-sample, NOT the bout path's
+        // elapsed-time weighting. The day feed is a raw, non-gap-filled union of HR, so a
+        // single isolated elevated sample an hour from its neighbours must contribute ONE
+        // second of active burn — not up to mergeGapS (150 s) of it. Two active samples an
+        // hour apart therefore burn the same as two adjacent active seconds (each = 1 s),
+        // proving the day path does NOT inherit the bout cap-and-credit behaviour.
+        let profile = UserProfile(weightKg: 80, heightCm: 180, age: 35, sex: "male")
+        let gapped = [HRSample(ts: 0, bpm: 130), HRSample(ts: 3600, bpm: 130)]
+        let twoAdjacent = [HRSample(ts: 0, bpm: 130), HRSample(ts: 1, bpm: 130)]
+        let gappedDay = Calories.estimateDayCalories(gapped, profile: profile, hrmax: 185.0, restingHR: 55.0)
+        let adjacentDay = Calories.estimateDayCalories(twoAdjacent, profile: profile, hrmax: 185.0, restingHR: 55.0)
+        XCTAssertEqual(gappedDay, adjacentDay, accuracy: 1e-9,
+                       "the day path must count each sample as exactly one second regardless of gaps")
+        // Teeth: if the day path had inherited the bout cap, the gappy total would be ~75x larger
+        // (150 s + 1 s vs 1 s + 1 s of active burn). Prove it stayed flat per-sample.
+        let boutGapped = Calories.estimateBoutCalories(gapped, profile: profile, hrmax: 185.0, restingHR: 55.0).0
+        XCTAssertGreaterThan(boutGapped, gappedDay * 10,
+                             "the bout path DOES cap-and-credit, so it must dwarf the per-second day total")
     }
 
     // A timestamp safely inside UTC day 2026-01-02 (2026-01-02T12:00:00Z).

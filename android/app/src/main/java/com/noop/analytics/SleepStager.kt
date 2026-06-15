@@ -808,7 +808,10 @@ object SleepStager {
     /** Same-length convolution with reflect padding (edge-stable). */
     internal fun convolveReflect(x: List<Double>, kernel: List<Double>): List<Double> {
         val r = kernel.size / 2
-        if (r == 0 || x.isEmpty()) return x
+        // A signal shorter than the kernel radius can't be reflect-padded (the mirror reads x[r]
+        // and x[x.size-2-i]) — return it unchanged rather than indexing out of bounds. In practice
+        // the only caller is gated by the 60-min session floor, so this is defensive.
+        if (r == 0 || x.size <= r) return x
         // Reflect padding: numpy 'reflect' mirrors WITHOUT repeating the edge sample.
         val padded = ArrayList<Double>(x.size + 2 * r)
         for (i in 0 until r) padded.add(x[r - i]) // x[r], x[r-1], ... x[1]

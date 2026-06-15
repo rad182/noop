@@ -930,6 +930,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// on disappear so it does not permanently compete with historical offload.
     public func startRealtime() {
         screenWantsRealtime = true
+        state.liveFeedActive = true   // drives the menu-bar Start/Stop label off the real intent
         // The user explicitly (re-)asked for the full stream by opening Live / tapping Start HR — give the
         // heavy R10/R11 burst another chance even if a prior marginal-radio fallback had tripped. If the
         // radio still can't take it, the detector will simply trip again. (#80) This is screen-only intent;
@@ -948,6 +949,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// continuous capture is on keeps the dense stream flowing.
     public func stopRealtime() {
         screenWantsRealtime = false
+        state.liveFeedActive = false   // flip the menu-bar toggle back to "Start live feed"
         // Always stop the heavy R10/R11 burst when the Live screen leaves — it's the battery-hungry part
         // and is only ever wanted while a live screen is up. The lightweight TOGGLE/0x2A37 R-R stream is
         // what continuous capture keeps; the reconciler decides whether to disarm that.
@@ -1280,6 +1282,14 @@ public final class BLEManager: NSObject, ObservableObject {
         let localFmt = DateFormatter()
         localFmt.dateFormat = "EEE HH:mm zzz"
         if selectedModel.deviceFamily == .whoop5 {
+            // The 5/MG firmware alarm is unconfirmed (arming ACKs, but the wake actually FIRING is not
+            // verified), so only arm it when the user has opted into Experimental — matching the Android
+            // client, which refuses to arm it otherwise. Without this a normal 5/MG user is silently
+            // armed onto an alarm that may never fire.
+            guard PuffinExperiment.isEnabled else {
+                log("Alarm: 5/MG firmware alarm needs the Experimental toggle (unconfirmed) — not armed")
+                return
+            }
             // 5/MG SET_ALARM_TIME is REVISION_4: [04][id][u32 sec][u16 subsec][12-byte 47/152
             // pattern, overallLoop 7, 30 s]. No SET_CLOCK preamble (see doc comment above).
             let wakeMs = Int64((date.timeIntervalSince1970 * 1000).rounded())
@@ -1427,6 +1437,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         state.encryptedBond = false   // cleared with didBond; next session must re-prove the bond (#69)
         state.charging = nil          // a stale charging flag must not outlive the link
         state.clearBiometrics()       // and a stale HR / R-R must not outlive the link either
+        state.liveFeedActive = false  // a drop while Live is open must not leave a stale "Stop live feed"
         didBond = false
         whoop5RealtimeArmed = false
         // The strap forgets the realtime-HR toggle across a disconnect; the post-bond branch re-arms it
@@ -1512,6 +1523,15 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         self.restoredPeripheral = p
         p.delegate = self
         resetCharacteristics()
+        // Re-derive the inbound-decode family from the persisted model. connect()/startScan() set the
+        // reassembler + router family, but NEITHER runs on the restore path — so without this a restored
+        // WHOOP 5/MG would decode its puffin notify frames with the default .whoop4 framing (different
+        // length offset + constant), producing corrupt/empty data for the whole unattended session until
+        // the user manually taps connect.
+        selectedModel = .persisted
+        reassembler = Reassembler(family: selectedModel.deviceFamily)
+        router.family = selectedModel.deviceFamily
+        configureCollectorFamily()
         // Collection only runs post-bond, so a restored link was already bonded;
         // seed those flags now. `didWriteValueFor` won't re-fire on its own.
         state.bonded = true

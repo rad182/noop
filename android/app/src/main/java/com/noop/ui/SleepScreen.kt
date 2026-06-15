@@ -1646,7 +1646,13 @@ internal fun buildSleepModel(
         if (lastDay != null && imported.consistency[lastDay] != null) {
             val series = metricsWindow.mapNotNull { imported.consistency[it.day] }
             Metric(series.lastOrNull(), mean(series), series)
-        } else consistencySeries(metricsWindow)   // APPROXIMATE duration-spread proxy
+        } else {
+            // Use windowDays (original DailyMetric totalSleepMin) not metricsWindow: the
+            // metricsWindow substitutes sessionDurationMin (time in bed = endTs−startTs)
+            // which is always larger than totalSleepMin (actual asleep time). One inflated
+            // outlier in the spread pushes SD past 90 min → score collapses to 0%.
+            consistencySeries(windowDays)
+        }
     }
     val hoursVsNeeded = metric(metricsWindow) { d ->
         val need = imported.needMin[d.day] ?: needMin   // imported need wins per day

@@ -25,14 +25,79 @@ class DayCaloriesTest {
     }
 
     @Test
-    fun dayCalories_matchesBoutFirst() {
-        // The day estimate must equal the kcal component of the per-bout model for the
-        // same samples (it delegates to estimateBoutCalories), so the two never diverge.
+    fun dayCalories_matchesBoutAtOneHz() {
+        // At a steady 1 Hz stream the day and bout estimators agree exactly: the bout path's
+        // elapsed-time weighting caps every ~1 s interval at 1 s, so it collapses to the day
+        // path's flat one-second-per-sample. (They DIVERGE on gappy streams — see
+        // dayPath_doesNotOverCountGappyDays — but not here.)
         val profile = UserProfile(weightKg = 80.0, heightCm = 180.0, age = 35.0, sex = "male")
-        val hr = hrDay(bpm = 130, n = 600) // 10 min above the active threshold
+        val hr = hrDay(bpm = 130, n = 600) // 10 min above the active threshold, dense 1 Hz
         val day = Calories.estimateDayCalories(hr, profile, hrmax = 185.0, restingHR = 55.0)
         val bout = Calories.estimateBoutCalories(hr, profile, hrmax = 185.0, restingHR = 55.0).first
         assertEquals(bout, day, 1e-9)
+    }
+
+    @Test
+    fun sparseHr_tracksElapsedTimeNotSampleCount() {
+        // A 10-minute effort at a steady active HR, sampled two ways over the SAME ~600 s span:
+        // densely at 1 Hz, and sparsely at one sample / 10 s (the WHOOP 5/MG case). Energy must
+        // track elapsed time, so the sparse estimate lands close to the dense one — NOT ~1/10th
+        // of it, as the old one-second-per-sample count produced. (BOUT path only.)
+        val profile = UserProfile(weightKg = 80.0, heightCm = 180.0, age = 35.0, sex = "male")
+        val dense = (0 until 600).map { com.noop.data.HrSample(deviceId = "t", ts = it.toLong(), bpm = 130) }
+        val sparse = (0 until 600 step 10).map { com.noop.data.HrSample(deviceId = "t", ts = it.toLong(), bpm = 130) }
+        val denseKcal = Calories.estimateBoutCalories(dense, profile, hrmax = 185.0, restingHR = 55.0).first
+        val sparseKcal = Calories.estimateBoutCalories(sparse, profile, hrmax = 185.0, restingHR = 55.0).first
+        assertEquals("sparse HR must be counted over elapsed time, not undercounted per sample",
+            denseKcal, sparseKcal, denseKcal * 0.05)
+        // Teeth: a per-sample count (60 samples) would be ~1/10th of the dense total.
+        assertTrue(sparseKcal > denseKcal * 0.5)
+    }
+
+    @Test
+    fun wearGap_isCappedNotCreditedInFull() {
+        // Two active samples an hour apart must NOT credit a full hour of active burn — the
+        // per-sample interval is capped at mergeGapS (150 s). The pre-gap sample contributes
+        // 150 s and the tail 1 s, so the total equals a 151 s continuous equivalent, not 3600 s.
+        // (BOUT path only.)
+        val profile = UserProfile(weightKg = 80.0, heightCm = 180.0, age = 35.0, sex = "male")
+        val gapped = listOf(
+            com.noop.data.HrSample(deviceId = "t", ts = 0L, bpm = 130),
+            com.noop.data.HrSample(deviceId = "t", ts = 3600L, bpm = 130),
+        )
+        val cappedEquiv = (0..150).map { com.noop.data.HrSample(deviceId = "t", ts = it.toLong(), bpm = 130) }
+        val gappedKcal = Calories.estimateBoutCalories(gapped, profile, hrmax = 185.0, restingHR = 55.0).first
+        val equivKcal = Calories.estimateBoutCalories(cappedEquiv, profile, hrmax = 185.0, restingHR = 55.0).first
+        assertEquals("an inter-sample gap must be capped at mergeGapS, not credited in full",
+            equivKcal, gappedKcal, equivKcal * 0.001)
+    }
+
+    @Test
+    fun dayPath_doesNotOverCountGappyDays() {
+        // The WHOLE-DAY estimator must STAY on one-second-per-sample, NOT the bout path's
+        // elapsed-time weighting. The day feed is a raw, non-gap-filled union of HR, so a
+        // single isolated elevated sample an hour from its neighbours must contribute ONE
+        // second of active burn — not up to mergeGapS (150 s) of it. Two active samples an
+        // hour apart therefore burn the same as two adjacent active seconds (each = 1 s),
+        // proving the day path does NOT inherit the bout cap-and-credit behaviour.
+        val profile = UserProfile(weightKg = 80.0, heightCm = 180.0, age = 35.0, sex = "male")
+        val gapped = listOf(
+            com.noop.data.HrSample(deviceId = "t", ts = 0L, bpm = 130),
+            com.noop.data.HrSample(deviceId = "t", ts = 3600L, bpm = 130),
+        )
+        val twoAdjacent = listOf(
+            com.noop.data.HrSample(deviceId = "t", ts = 0L, bpm = 130),
+            com.noop.data.HrSample(deviceId = "t", ts = 1L, bpm = 130),
+        )
+        val gappedDay = Calories.estimateDayCalories(gapped, profile, hrmax = 185.0, restingHR = 55.0)
+        val adjacentDay = Calories.estimateDayCalories(twoAdjacent, profile, hrmax = 185.0, restingHR = 55.0)
+        assertEquals("the day path must count each sample as exactly one second regardless of gaps",
+            adjacentDay, gappedDay, 1e-9)
+        // Teeth: if the day path had inherited the bout cap, the gappy total would be ~75x larger
+        // (150 s + 1 s vs 1 s + 1 s of active burn). Prove it stayed flat per-sample.
+        val boutGapped = Calories.estimateBoutCalories(gapped, profile, hrmax = 185.0, restingHR = 55.0).first
+        assertTrue("the bout path DOES cap-and-credit, so it must dwarf the per-second day total",
+            boutGapped > gappedDay * 10)
     }
 
     @Test

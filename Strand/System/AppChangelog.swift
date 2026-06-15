@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "3.0.3"
+    static let currentVersion = "3.1.0"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,18 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "3.1.0",
+            title: "Accuracy, reliability & accessibility — a big community-fixes wave",
+            date: "June 2026",
+            items: [
+                "Smart alarm: it now re-arms every day, so a strap that stays connected keeps waking you past the first morning (iPhone, Mac and Android). On WHOOP 5/MG the strap's firmware alarm correctly stays behind the Experimental toggle until it's confirmed. Thanks @vulnix0x4 (#376, #379).",
+                "More honest numbers: workout calories now count sparse heart-rate streams properly without ever over-counting your whole day; heart-rate zones are no longer inflated by a gap when the strap is off your wrist; daytime stress no longer false-alarms from your overnight sleep; and the recovery baseline reads your imported data cleanly. Thanks @vulnix0x4 (#360, #366, #357, #387).",
+                "Bluetooth & live HR: WHOOP 5/MG keeps decoding correctly after iOS relaunches NOOP in the background, and the Lock-Screen / Dynamic-Island live heart rate now ends when the strap disconnects instead of freezing on a stale number. Thanks @vulnix0x4 (#378, #386).",
+                "Your data is safer: a failed import now keeps your existing data instead of risking an empty database, and the AI Coach never sends an API key you saved for one provider to a different one. Thanks @vulnix0x4 (#383, #385).",
+                "Accessibility & polish: the breathing orb honours Reduce Motion, the 24-hour heart-rate chart reads out in VoiceOver, text scales with Dynamic Type, the day navigator has bigger tap targets, and Sleep/Stress times follow your device's 12/24-hour and language settings. The Today screen also stays smooth while live heart rate streams. Thanks @vulnix0x4 (#359, #362, #381, #363, #361, #388, #358).",
+                "Android: workout rows are now tappable with a detail sheet, and the sleep-consistency tile no longer reads a false 0% — thanks @ujix (#370, #367). The Rest confidence dot now matches iPhone/Mac (#373). Plus an accurate Mac menu-bar live-feed toggle, and \"What's New\" no longer gets skipped after an update that also refreshes the Terms (#390, #389).",
+            ]),
         Release(
             version: "3.0.3",
             title: "Large Apple Health imports no longer crash (iPhone/Mac)",

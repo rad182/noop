@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "3.0.3"
+    const val CURRENT_VERSION = "3.1.0"
 
     data class Release(
         val version: String,
@@ -36,6 +36,18 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "3.1.0",
+            title = "Accuracy, reliability & accessibility — a big community-fixes wave",
+            date = "June 2026",
+            items = listOf(
+                "Smart alarm: it now re-arms every day, so a strap that stays connected keeps waking you past the first morning (iPhone, Mac and Android). On WHOOP 5/MG the strap's firmware alarm correctly stays behind the Experimental toggle until it's confirmed. Thanks @vulnix0x4 (#376, #379).",
+                "More honest numbers: workout calories now count sparse heart-rate streams properly without ever over-counting your whole day; heart-rate zones are no longer inflated by a gap when the strap is off your wrist; daytime stress no longer false-alarms from your overnight sleep; and the recovery baseline reads your imported data cleanly. Thanks @vulnix0x4 (#360, #366, #357, #387).",
+                "On Android specifically: workout rows are now tappable with a detail sheet, and the sleep-consistency tile no longer reads a false 0% — thanks @ujix (#370, #367). The Rest confidence dot now matches iPhone/Mac (#373).",
+                "Shared in lockstep with iPhone/Mac: the smart-alarm daily re-arm, the calorie/zone/stress/recovery accuracy fixes above, and the safer data handling (a failed import keeps your existing data; the AI Coach never reuses a key across providers). Thanks @vulnix0x4.",
+                "Several fixes in this release are iPhone/Mac-only by nature (VoiceOver on the HR chart, Reduce Motion on the breathing orb, Dynamic Type, Live-Activity end-on-disconnect, background-restore decoding, the Mac menu-bar toggle); Android is versioned in lockstep so every platform tells the same story.",
+            ),
+        ),
         Release(
             version = "3.0.3",
             title = "Large Apple Health imports no longer crash (iPhone/Mac)",

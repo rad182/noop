@@ -17,6 +17,19 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 3.1.0 — Accuracy, reliability & accessibility: a big community-fixes wave
+
+A large wave of community-contributed fixes, each independently verified and reimplemented under the project. Credits inline.
+
+- **Smart alarm now re-arms daily (all platforms):** a continuously-connected strap keeps waking you past the first morning instead of firing once and going silent. On WHOOP 5/MG the strap firmware alarm stays gated behind the Experimental toggle until it's confirmed. Thanks @vulnix0x4 (#376, #379).
+- **More honest numbers:** workout calories count sparse (WHOOP 5/MG) heart-rate streams correctly without over-counting your whole day; heart-rate zones are no longer inflated by an off-wrist gap; daytime stress no longer false-alarms from overnight sleep; the recovery baseline reads imported data cleanly. Thanks @vulnix0x4 (#360, #366, #357, #387).
+- **Bluetooth & live HR:** WHOOP 5/MG keeps decoding correctly after iOS relaunches the app in the background (#378); the Lock-Screen / Dynamic-Island live HR ends on disconnect instead of freezing a stale number (#386). Thanks @vulnix0x4.
+- **Safer data:** a failed import keeps your existing data instead of risking an empty database (#383); the AI Coach never sends a key saved for one provider to a different one (#385). Thanks @vulnix0x4.
+- **Accessibility & polish (iPhone/Mac):** Reduce Motion on the breathing orb (#359), VoiceOver on the 24-hour HR chart (#362), Dynamic Type scaling (#381), bigger day-navigator tap targets (#363), 12/24-hour + localized Sleep/Stress times (#361, #388), and a smoother Today screen during live HR (#358). "What's New" is no longer skipped after a combined Terms + version update (#389); the Mac menu-bar live-feed toggle is accurate (#390). Thanks @vulnix0x4.
+- **Android:** tappable workout rows with a detail sheet (#370) and a fixed sleep-consistency tile (#367) — thanks @ujix; the Rest confidence dot now matches iPhone/Mac (#373).
+
+---
+
 ## 3.0.3 — Large Apple Health imports no longer crash (iPhone/Mac)
 
 - **Fixed (iPhone/Mac):** importing a large, multi-year Apple Health export no longer runs out of memory and closes the app — the importer aggregates day-by-day as it reads instead of holding every sample in memory (Android already worked this way). Also accepts a localised export filename (e.g. `экспорт.xml`) instead of requiring `export.xml`. Thanks @exzanimo (#355).

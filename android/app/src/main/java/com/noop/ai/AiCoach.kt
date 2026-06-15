@@ -57,8 +57,10 @@ class AiCoach(private val repo: WhoopRepository) {
         consent: Boolean = false,
         customBaseUrl: String = "",
     ): String = withContext(Dispatchers.IO) {
-        // Local (Custom) servers usually need no key; the cloud providers always do.
-        val key = AiKeyStore.read(ctx)
+        // Local (Custom) servers usually need no key; the cloud providers always do. The guarded read
+        // returns the stored key ONLY if it belongs to THIS provider (or is a legacy cloud key) — so a
+        // key saved for one provider is never Bearer-sent to another provider's (or a Custom) endpoint.
+        val key = AiKeyStore.read(ctx, provider)
         if (key == null && provider != AiProvider.CUSTOM) {
             throw Exception("No API key set. Add your ${provider.displayName} key to use the coach.")
         }
@@ -111,7 +113,9 @@ class AiCoach(private val repo: WhoopRepository) {
         provider: AiProvider,
         customBaseUrl: String = "",
     ): List<String> = withContext(Dispatchers.IO) {
-        val key = AiKeyStore.read(ctx)
+        // Guarded read: only a key saved for THIS provider (or a legacy cloud key) is used — never one
+        // provider's key against another's models endpoint.
+        val key = AiKeyStore.read(ctx, provider)
         // Cloud providers need a key to list models; a local Custom server usually doesn't.
         if (key == null && provider != AiProvider.CUSTOM) return@withContext emptyList()
 

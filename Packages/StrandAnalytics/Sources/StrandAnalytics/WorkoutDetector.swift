@@ -387,11 +387,75 @@ public enum Calories {
         return max(0.0, eeKjMin) / workoutDivisor
     }
 
-    /// Estimate (kcal, kJ) for a workout bout. Each HR sample = 1 second of data.
+    /// Estimate (kcal, kJ) for a workout bout. Each sample is weighted by the ELAPSED time
+    /// to the next sample (capped at `WorkoutDetector.mergeGapS`), so a sparse, non-1 Hz
+    /// stream is counted over real seconds rather than undercounted as one second per sample.
+    ///
+    /// This elapsed-time weighting is justified ONLY for the bout path: a bout's intra-sample
+    /// gaps are motion-gated and ≤ mergeGapS (150 s) by construction, so each gap really is
+    /// continuous active/resting time. The whole-day estimator deliberately does NOT use it
+    /// (see `estimateDayCalories`) — its raw, non-gap-filled day HR union would otherwise
+    /// credit up to 150 s of active burn to a single isolated elevated sample.
     public static func estimateBoutCalories(_ hrSamples: [HRSample],
                                             profile: UserProfile,
                                             hrmax: Double?,
                                             restingHR: Double?) -> (Double, Double) {
+        let weightKg = profile.weightKg > 0 ? profile.weightKg : 70.0
+        let heightCm = profile.heightCm > 0 ? profile.heightCm : 170.0
+        let age = profile.age > 0 ? profile.age : 30.0
+        let coeffs = resolveCoeffs(profile.sex)
+
+        let effHRmax = hrmax ?? 220.0
+        let effResting = restingHR ?? 60.0
+        let activeThreshold = effResting + activeHRRFraction * (effHRmax - effResting)
+
+        let restingRate = restingKcalPerS(coeffs, weightKg: weightKg, heightCm: heightCm, age: age)
+
+        // Weight each sample by the ACTUAL elapsed time to the next sample, not a flat 1 s.
+        // restingRate / activeKcalPerS are per-SECOND rates, so summing one per sample only
+        // equals real energy when the stream is exactly 1 Hz. A sparse WHOOP 5/MG bout can
+        // run far below 1 sample/s, which previously undercounted energy roughly in proportion
+        // to the coverage gap (calories collapsing toward ~1 kcal, #137). Each interval is
+        // capped at mergeGapS (150 s) — the detector's own "still continuous, not resting"
+        // threshold — so a brief dropout is fully counted but a wear gap can't inflate one
+        // reading. At a steady 1 Hz every interval is ~1 s: behaviour is unchanged.
+        let ordered = hrSamples.sorted { $0.ts < $1.ts }
+        var totalKcal = 0.0
+        for i in ordered.indices {
+            let bpm = Double(ordered[i].bpm)
+            let dur: Double
+            if i < ordered.count - 1 {
+                let gap = Double(ordered[i + 1].ts - ordered[i].ts)
+                dur = gap > 0 ? min(gap, WorkoutDetector.mergeGapS) : 1.0
+            } else {
+                dur = 1.0   // last sample carries one representative second
+            }
+            if bpm < activeThreshold {
+                totalKcal += restingRate * dur
+            } else {
+                totalKcal += activeKcalPerS(coeffs, hr: bpm, hrmax: effHRmax, weightKg: weightKg, age: age) * dur
+            }
+        }
+        return (totalKcal, totalKcal * 4.184)
+    }
+
+    /// APPROXIMATE whole-day total energy estimate (kcal) from the full day's HR samples.
+    /// Same per-second model as `estimateBoutCalories`: below the activeThreshold
+    /// (resting + 30% HRR) a sample burns the resting BMR rate, above it the Keytel active
+    /// rate. Each HR sample = ONE second of data (1 Hz strap), counted flat — this path
+    /// deliberately does NOT use the bout estimator's elapsed-time-per-sample weighting.
+    /// The day feed is a raw, non-gap-filled union of the day's HR (it is NOT motion-gated
+    /// the way a bout is), so capping each gap at mergeGapS (150 s) would credit up to ~150 s
+    /// of active burn to a single isolated elevated sample — over-counting by ~150x on gappy
+    /// days. Flat one-second-per-sample is the conservative, stable choice for the day total.
+    /// This is an on-device estimate from heart rate alone — NOT laboratory calorimetry, NOT
+    /// Apple/WHOOP cloud parity, NOT medical advice. Returns total estimated kcal (>= 0).
+    public static func estimateDayCalories(_ hrSamples: [HRSample],
+                                           profile: UserProfile,
+                                           hrmax: Double?,
+                                           restingHR: Double?) -> Double {
+        if hrSamples.isEmpty { return 0.0 }
+
         let weightKg = profile.weightKg > 0 ? profile.weightKg : 70.0
         let heightCm = profile.heightCm > 0 ? profile.heightCm : 170.0
         let age = profile.age > 0 ? profile.age : 30.0
@@ -412,21 +476,6 @@ public enum Calories {
                 totalKcal += activeKcalPerS(coeffs, hr: bpm, hrmax: effHRmax, weightKg: weightKg, age: age)
             }
         }
-        return (totalKcal, totalKcal * 4.184)
-    }
-
-    /// APPROXIMATE whole-day total energy estimate (kcal) from the full day's HR samples.
-    /// Identical per-second model as `estimateBoutCalories`: below the activeThreshold
-    /// (resting + 30% HRR) a sample burns the resting BMR rate, above it the Keytel active
-    /// rate. Each HR sample = 1 second of data (1 Hz strap). Delegating to the bout estimator
-    /// keeps the day total and the per-workout total from ever diverging. This is an on-device
-    /// estimate from heart rate alone — NOT laboratory calorimetry, NOT Apple/WHOOP cloud parity,
-    /// NOT medical advice. Returns total estimated kcal for the day (>= 0).
-    public static func estimateDayCalories(_ hrSamples: [HRSample],
-                                           profile: UserProfile,
-                                           hrmax: Double?,
-                                           restingHR: Double?) -> Double {
-        if hrSamples.isEmpty { return 0.0 }
-        return estimateBoutCalories(hrSamples, profile: profile, hrmax: hrmax, restingHR: restingHR).0
+        return totalKcal
     }
 }

@@ -197,6 +197,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 lastBonded = state.bonded
             }
         }
+        // Re-arm the strap's firmware alarm once per process-alive day. The firmware alarm is a single
+        // absolute instant with NO recurrence and was previously re-armed ONLY on the bond edge — so a
+        // strap that stays continuously bonded (a phone in range overnight) would fire once and then
+        // never re-arm, going silent from day two. While the process is alive this loop recomputes the
+        // next future occurrence each day and re-arms it.
+        //
+        // SAFETY: this is only the SECONDARY strap-buzz cue — the GUARANTEED wake is a separate exact OS
+        // alarm via [SmartAlarmScheduler], which re-arms itself daily and survives process death. So a
+        // process-alive loop is the right minimal scope here (parity with macOS's live re-arm Timer and
+        // iOS's foreground re-arm). [applySmartAlarm] self-gates on _smartAlarmEnabled and only ever arms
+        // a FUTURE instant (today's wake, or tomorrow's if already passed) — it never disarms while the
+        // alarm is enabled — so the daily tick can only ever move the armed time equal-or-later.
+        viewModelScope.launch {
+            while (isActive) {
+                delay(STRAP_ALARM_REARM_INTERVAL_MS) // daily
+                if (_smartAlarmEnabled.value) applySmartAlarm()
+            }
+        }
         // Recompute the illness banner + today's row whenever cached days change.
         viewModelScope.launch {
             recentDays.collect { days ->
@@ -918,6 +936,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val FIRST_OFFLOAD_GRACE_MS = 6_000L
         /** On-device scoring cadence — 15 min, matching the strap offload cadence. */
         const val ANALYZE_INTERVAL_MS = 15 * 60 * 1_000L
+        /** Daily re-arm cadence for the single-instant strap firmware alarm (secondary buzz cue). */
+        const val STRAP_ALARM_REARM_INTERVAL_MS = 24 * 60 * 60 * 1_000L
     }
 }
 

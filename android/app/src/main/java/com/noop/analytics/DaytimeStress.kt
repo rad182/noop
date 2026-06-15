@@ -181,8 +181,16 @@ object DaytimeStress {
         //    across-hour SD. This makes a flat day read ~baseline and a spiky day surface its
         //    tense hours — without any cross-day history. Falls back to the plain mean when
         //    there are too few scored hours for a quartile.
-        val hrMeans = aggs.mapNotNull { it.meanHr }
-        val rmssdVals = aggs.mapNotNull { it.rmssd }
+        //
+        //    Built from the WAKING hours only — the same hours scored in step 4. Sleep is the
+        //    calmest, lowest-HR / highest-HRV stretch of the day, and the analysis window
+        //    always begins at local midnight, so the current day routinely carries several
+        //    hours of it. Letting those night hours into the reference drags the "calm" anchor
+        //    far beneath every waking hour, inflating an ordinary calm day toward HIGH and
+        //    falsely tripping the sustained-high Breathe nudge.
+        val referenceAggs = aggs.filter { isWakingHour(it.bucket) }
+        val hrMeans = referenceAggs.mapNotNull { it.meanHr }
+        val rmssdVals = referenceAggs.mapNotNull { it.rmssd }
         val refHr = calmReference(hrMeans, calmIsLow = true)         // calm HR is LOW
         val refRmssd = calmReference(rmssdVals, calmIsLow = false)   // calm HRV is HIGH
         val sdHr = std(hrMeans, mean(hrMeans))
@@ -191,9 +199,8 @@ object DaytimeStress {
         // 4) Score each waking-hour bucket on the shared 0–3 curve.
         val points = ArrayList<HourPoint>(aggs.size)
         for (a in aggs) {
+            if (!isWakingHour(a.bucket)) continue
             val hourOfDay = (floorDiv(a.bucket, bucketSeconds) % 24).toInt()
-            val waking = hourOfDay >= wakingStartHour && hourOfDay < wakingEndHour
-            if (!waking) continue
             // The wall-clock bucket start (undo the local shift applied above).
             val wallStart = a.bucket - tzOffsetSeconds
             // Score only when HR cleared the count gate (HR is the always-available anchor;
@@ -240,6 +247,16 @@ object DaytimeStress {
     }
 
     /**
+     * Whether a local hour-bucket start falls inside the waking window the timeline scores
+     * (06:00–22:00). The single source of truth for "waking" — used both to build the calm
+     * reference and to pick the hours to score, so the two can never drift apart.
+     */
+    private fun isWakingHour(bucket: Long): Boolean {
+        val hourOfDay = (floorDiv(bucket, bucketSeconds) % 24).toInt()
+        return hourOfDay >= wakingStartHour && hourOfDay < wakingEndHour
+    }
+
+    /**
      * The day's "calm" reference for a signal: the quartile toward the calm end (lower
      * quartile when calm is LOW, e.g. HR; upper quartile when calm is HIGH, e.g. RMSSD).
      * Falls back to the plain mean below 4 values, and to null when empty.
@@ -254,6 +271,7 @@ object DaytimeStress {
     /** Linear-interpolated quantile of an already-sorted, non-empty list. */
     private fun quantile(sorted: List<Double>, q: Double): Double {
         val n = sorted.size
+        if (n == 0) return 0.0   // defensive: callers guard emptiness; never index []
         if (n == 1) return sorted[0]
         val pos = q * (n - 1)
         val lo = pos.toInt()
