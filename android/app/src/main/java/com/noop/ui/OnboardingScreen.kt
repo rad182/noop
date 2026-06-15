@@ -607,6 +607,19 @@ private fun ConnectStep(viewModel: AppViewModel) {
                 title = "This can run while you finish setup",
                 message = "If the strap is nearby, NOOP will keep the BLE link alive in the background. You can continue through profile and import while it bonds.",
             )
+
+            // WHOOP is NOOP's primary band, so onboarding leads with it — but it isn't required.
+            // Make that obvious so a non-WHOOP user doesn't feel stuck on this step (#415-adjacent):
+            // they can continue now and pair a heart-rate strap or import data afterwards.
+            if (!live.bonded) {
+                Text(
+                    "No WHOOP? You can still continue. Pair a heart-rate strap (Polar, Wahoo, Coospo, Garmin HRM…) " +
+                        "or import your WHOOP data later under Settings → Devices.",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
