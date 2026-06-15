@@ -18,6 +18,13 @@ public enum WhoopCommand: UInt8, CaseIterable {
     case getDataRange          = 34
     case getHelloHarvard       = 35
     case getAdvertisingNameHarvard = 76
+    /// SET_ADVERTISING_NAME_HARVARD (77) — rename the strap's BLE advertising name on a WHOOP 4.0
+    /// (Harvard). Payload = `advertisingNamePayload(_:)` (a 2-byte header + UTF-8 name + trailing NUL,
+    /// the form WHOOP 4.0 firmware accepts). The strap reboots to apply, so the new name shows on the
+    /// next connect (the connect handshake re-reads it via cmd 76). WHOOP 4.0 only — a 5/MG uses puffin
+    /// framing and a different device-config path. Reversible (rename again any time). Driven only by
+    /// `BLEManager.renameStrap(_:)`.
+    case setAdvertisingNameHarvard = 77
     case startRawData          = 81
     case stopRawData           = 82
     case enterHighFreqSync     = 96
@@ -83,6 +90,7 @@ public enum WhoopCommand: UInt8, CaseIterable {
         case .getDataRange:          return "Get Data Range"
         case .getHelloHarvard:       return "Get Hello (Harvard)"
         case .getAdvertisingNameHarvard: return "Get Advertising Name (Harvard)"
+        case .setAdvertisingNameHarvard: return "Set Advertising Name (Harvard)"
         case .startRawData:          return "Start Raw Data"
         case .stopRawData:           return "Stop Raw Data"
         case .enterHighFreqSync:     return "Enter High-Freq Sync"
@@ -116,6 +124,21 @@ public enum WhoopCommand: UInt8, CaseIterable {
          UInt8((epochSec >> 16) & 0xFF),
          UInt8((epochSec >> 24) & 0xFF),
          0x00, 0x00]
+    }
+
+    /// Max UTF-8 byte length for a strap advertising name. BLE caps the whole advertising payload at
+    /// 31 bytes; keeping the name ≤ 24 leaves room for the rest of the AD structure (flags + service
+    /// UUID) the strap still has to broadcast.
+    public static let maxAdvertisingNameBytes = 24
+
+    /// SET_ADVERTISING_NAME_HARVARD (77) payload: `[0x00, 0x00] + <UTF-8 name> + [0x00]`.
+    /// The 2-byte header + trailing NUL is the `h2z` layout verified against the whoop-rename prototype
+    /// on WHOOP 4.0 firmware. The name is clamped to `maxAdvertisingNameBytes` on a Unicode-scalar
+    /// boundary (never splitting a multibyte character) so it can't overflow the BLE advertising packet.
+    public static func advertisingNamePayload(_ name: String) -> [UInt8] {
+        var clamped = name
+        while clamped.utf8.count > maxAdvertisingNameBytes { clamped.removeLast() }
+        return [0x00, 0x00] + Array(clamped.utf8) + [0x00]
     }
 
     /// COMMAND packet type byte (PacketType.COMMAND).

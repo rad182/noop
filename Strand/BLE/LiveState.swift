@@ -44,6 +44,14 @@ public final class LiveState: ObservableObject {
     @Published public var charging: Bool? = nil
     @Published public var lastFrameType: String? = nil
     @Published public var lastEvent: String? = nil
+    /// The strap's BLE advertising name, read back from firmware via GET_ADVERTISING_NAME_HARVARD
+    /// (cmd 76 — sent in the connect handshake, parsed by FrameRouter). nil until the first reply.
+    /// WHOOP 4.0 only; the rename control in Settings shows this as the strap's current name.
+    @Published public var advertisingName: String? = nil
+    /// Transient, human-readable result of the most recent strap-rename attempt — the
+    /// SET_ADVERTISING_NAME_HARVARD ack, or a local validation message from BLEManager.renameStrap.
+    /// Surfaced under the rename field; overwritten by the next attempt.
+    @Published public var renameStatus: String? = nil
     /// Wrist-wear state from WRIST_ON/WRIST_OFF events. Defaults true so wear-gated features work
     /// before the first event arrives; flipped by FrameRouter on a real event.
     @Published public var worn: Bool = true

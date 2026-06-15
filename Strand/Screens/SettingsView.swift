@@ -36,6 +36,13 @@ struct SettingsView: View {
     /// BLE sensor for Garmin/Zwift/gym kit. See [PuffinExperiment.broadcastHrKey]. (#181)
     @AppStorage(PuffinExperiment.broadcastHrKey) private var broadcastHrEnabled = false
 
+    /// The strap model the user last picked (same key the scan pickers write). Gates the WHOOP 4.0-only
+    /// rename control in the strap card — renaming uses the Harvard command set, which a 5/MG doesn't share.
+    @AppStorage("selectedWhoopModel") private var selectedWhoopModelRaw = WhoopModel.whoop4.rawValue
+    /// Draft text for the strap-rename field (strap card). Empty placeholder; never pre-seeded so the
+    /// current name stays visible separately above it.
+    @State private var strapNameDraft = ""
+
     /// Opt-in "Continuous HRV capture" (off by default) — holds the dense realtime stream armed 24/7 so
     /// the strap banks beat-to-beat R-R for better overnight HRV/recovery/sleep, at a battery cost.
     /// See [PuffinExperiment.keepRealtimeForDataKey].
@@ -442,6 +449,12 @@ struct SettingsView: View {
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // MARK: Strap name — rename the WHOOP 4.0's BLE advertising name (Harvard command set).
+                if live.connected && selectedWhoopModelRaw == WhoopModel.whoop4.rawValue {
+                    Divider().overlay(StrandPalette.hairline)
+                    strapNameControl
+                }
+
                 #if os(iOS)
                 Divider().overlay(StrandPalette.hairline)
                 // MARK: Live Activity — show live HR on the Lock Screen + Dynamic Island (#336).
@@ -458,6 +471,49 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 #endif
             }
+        }
+    }
+
+    /// Rename the WHOOP 4.0's BLE advertising name. Shows the current name (read back from firmware in
+    /// the connect handshake → `LiveState.advertisingName`) and writes a new one via `renameStrap`. The
+    /// strap reboots to apply, so the new name lands on the next connect. WHOOP 4.0 only (Harvard).
+    @ViewBuilder private var strapNameControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Strap name").strandOverline()
+            Text("Current: \(live.advertisingName ?? "—")")
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+            HStack(spacing: 12) {
+                TextField("New strap name", text: $strapNameDraft)
+                    .textFieldStyle(.plain)
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(StrandPalette.surfaceInset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(StrandPalette.hairline, lineWidth: 1))
+                    .disableAutocorrection(true)
+                    .accessibilityLabel("New strap name")
+                Button {
+                    model.ble.renameStrap(strapNameDraft)
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                        .padding(.horizontal, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(StrandPalette.accent)
+                .disabled(strapNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if let status = live.renameStatus {
+                Text(status)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+            }
+            Text("Changes the Bluetooth name your WHOOP 4.0 advertises — what you see when pairing. The strap reboots to apply, so the new name appears the next time it connects. WHOOP 4.0 only.")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

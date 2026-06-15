@@ -1089,6 +1089,48 @@ public final class BLEManager: NSObject, ObservableObject {
         log("Broadcast HR: wrote whoop_live_hr_in_adv_ind_pkt=\(on ? "1" : "0")")
     }
 
+    /// Read the strap's current BLE advertising name (WHOOP 4.0 / Harvard). The reply lands as a
+    /// GET_ADVERTISING_NAME COMMAND_RESPONSE and FrameRouter publishes it to `LiveState.advertisingName`.
+    /// Also sent automatically in the connect handshake; this is the manual refresh the Settings card
+    /// fires after a rename. No-op on a 5/MG (the Harvard name command isn't part of its framing).
+    public func requestAdvertisingName() {
+        guard selectedModel.deviceFamily == .whoop4 else {
+            log("Strap name: WHOOP 4.0 only — ignored on a 5/MG."); return
+        }
+        guard state.connected else { log("Strap name: not connected — ignored."); return }
+        send(.getAdvertisingNameHarvard, payload: [0x00])
+    }
+
+    /// Rename the strap's BLE advertising name (WHOOP 4.0 / Harvard) via SET_ADVERTISING_NAME (cmd 77).
+    /// Writes `[0x00,0x00] + UTF-8 name + [0x00]` (see `WhoopCommand.advertisingNamePayload`) over the
+    /// confirmed command channel; the strap reboots to apply, so the new name appears on the next connect
+    /// (the connect handshake re-reads it). The result ack is surfaced via `LiveState.renameStatus`.
+    /// WHOOP 4.0 only — a 5/MG uses puffin framing and a different device-config path. Reversible.
+    public func renameStrap(_ rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard selectedModel.deviceFamily == .whoop4 else {
+            state.renameStatus = "Renaming is WHOOP 4.0 only."
+            log("Strap rename: WHOOP 4.0 only — ignored on a 5/MG."); return
+        }
+        guard state.connected, state.bonded else {
+            state.renameStatus = "Connect and pair your strap first."
+            log("Strap rename: connect + bond first — ignored."); return
+        }
+        guard !name.isEmpty else {
+            state.renameStatus = "Enter a name first."; return
+        }
+        state.renameStatus = "Renaming…"
+        send(.setAdvertisingNameHarvard,
+             payload: WhoopCommand.advertisingNamePayload(name),
+             writeType: .withResponse)
+        log("Strap rename: wrote advertising name=\(name.debugDescription)")
+        // Re-read shortly after so the card reflects the change if the strap applies it without dropping
+        // the link; if it reboots instead, the connect handshake re-reads the name on reconnect anyway.
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(2)) { [weak self] in
+            self?.requestAdvertisingName()
+        }
+    }
+
     private func startKeepAlive() {
         keepAliveTimer?.cancel()
         let s = BLEManager.keepAliveIntervalSeconds

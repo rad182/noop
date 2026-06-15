@@ -54,6 +54,19 @@ public final class FrameRouter {
             if let pct = parsed.parsed["battery_pct"]?.doubleValue {
                 state.setBattery(pct)
             }
+            // Advertising-name replies (WHOOP 4.0 / Harvard). GET (cmd 76) carries the current name in
+            // its payload; SET (cmd 77) carries only a result byte. The schema has no field decode for
+            // either, so pull them straight from the frame bytes. The COMMAND_RESPONSE inner is
+            // [type,seq,cmd,origin_seq,result,payload…] starting at offset 4, with crc32 at `length`.
+            if family == .whoop4, let cmd = parsed.cmdName {
+                if cmd == "GET_ADVERTISING_NAME_HARVARD" {
+                    if let name = Self.advertisingName(in: frame), !name.isEmpty {
+                        state.advertisingName = name
+                    }
+                } else if cmd == "SET_ADVERTISING_NAME_HARVARD" {
+                    state.renameStatus = Self.renameAck(for: Self.commandResultByte(in: frame))
+                }
+            }
 
         case "EVENT":
             if let ev = parsed.parsed["event"]?.stringValue {
@@ -96,6 +109,43 @@ public final class FrameRouter {
 
         default:
             break
+        }
+    }
+
+    // MARK: - Advertising-name decode (WHOOP 4.0 / Harvard)
+
+    /// Offset of the inner `[type][seq][cmd][origin_seq][result][payload…]` in a WHOOP 4.0 frame:
+    /// SOF(1) + length(2) + crc8(1). Mirrors `WhoopCommand.frame` / `parseFrame`.
+    private static let whoop4InnerOffset = 4
+
+    /// Extract the advertising name from a GET_ADVERTISING_NAME COMMAND_RESPONSE: printable ASCII from
+    /// the payload that follows [type,seq,cmd,origin_seq,result] (payload starts at inner+5), up to the
+    /// crc32 trailer at `length`. Mirrors the whoop-rename prototype's `extract_name`. nil if too short.
+    static func advertisingName(in frame: [UInt8]) -> String? {
+        guard frame.count > 2 else { return nil }
+        let length = Int(frame[1]) | (Int(frame[2]) << 8)        // crc32 starts here
+        let start = whoop4InnerOffset + 5                        // skip type,seq,cmd,origin_seq,result
+        guard length <= frame.count, start < length else { return nil }
+        let printable = frame[start..<length].filter { $0 >= 32 && $0 < 127 }
+        return String(decoding: printable, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The result byte of a COMMAND_RESPONSE: inner offset + 4 ([type,seq,cmd,origin_seq] then result).
+    static func commandResultByte(in frame: [UInt8]) -> Int? {
+        let idx = whoop4InnerOffset + 4
+        return idx < frame.count ? Int(frame[idx]) : nil
+    }
+
+    /// Human-readable ack for a SET_ADVERTISING_NAME result byte (same codes as the prototype:
+    /// 0 Failure, 1 Success, 2 Pending, 3 Unsupported).
+    static func renameAck(for result: Int?) -> String {
+        switch result {
+        case 1:  return "Renamed — your strap reboots to apply the new name."
+        case 0:  return "The strap rejected the rename (failure)."
+        case 2:  return "Rename pending…"
+        case 3:  return "This strap firmware doesn't support renaming."
+        default: return "Rename sent — re-scan to confirm the new name."
         }
     }
 
