@@ -523,9 +523,9 @@ struct WorkoutsView: View {
                 #endif
             }
             #if os(iOS)
-            // The per-row actions live in a long-press context menu, which isn't discoverable on
-            // iPhone without a nudge (#183).
-            Text("Press and hold a workout to re-label, edit or delete it.")
+            // Each row now carries a visible "•••" actions button; the long-press contextMenu still
+            // works as a secondary path (#183).
+            Text("Tap ••• on a workout to re-label, edit or delete it.")
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .padding(.horizontal, 4)
@@ -560,6 +560,8 @@ struct WorkoutsView: View {
             colHeader("DIST", width: ColWidth.dist, align: .trailing)
             Spacer(minLength: 0)
             colHeader("SOURCE", width: ColWidth.source, align: .trailing)
+            // Empty header over the per-row "•••" actions menu column (keeps SOURCE aligned).
+            Color.clear.frame(width: ColWidth.action)
         }
         .padding(.horizontal, NoopMetrics.cardPadding)
         .frame(height: RowMetrics.headerHeight)
@@ -609,11 +611,34 @@ struct WorkoutsView: View {
                 sourceBadge(row.source)
             }
             .frame(width: ColWidth.source, alignment: .trailing)
+
+            // Visible per-row actions affordance (#1). Mirrors the right-click contextMenu so the
+            // relabel/edit/dismiss actions are discoverable without knowing to Control-click.
+            rowActionsMenu(row)
+                .frame(width: ColWidth.action, alignment: .trailing)
         }
         .padding(.horizontal, NoopMetrics.cardPadding)
         .frame(height: RowMetrics.rowHeight)
         .contentShape(Rectangle())
         .contextMenu { rowMenu(row) }
+    }
+
+    /// The same actions as `rowMenu`, surfaced as a tappable "•••" button so they're discoverable on
+    /// both macOS (no right-click needed) and iOS (no long-press needed). Borderless + hidden
+    /// indicator keeps it to a bare glyph that fits the row's metric rhythm.
+    private func rowActionsMenu(_ row: WorkoutRow) -> some View {
+        Menu {
+            rowMenu(row)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(StrandPalette.textTertiary)
+                .frame(width: ColWidth.action, height: RowMetrics.rowHeight)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     /// Right-click actions per row. A DETECTED bout can be re-labelled (becomes a real manual session
@@ -844,6 +869,7 @@ struct WorkoutsView: View {
         static let kcal: CGFloat = 70
         static let dist: CGFloat = 72
         static let source: CGFloat = 80
+        static let action: CGFloat = 36   // trailing "•••" per-row actions menu
     }
 }
 
