@@ -17,6 +17,15 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 3.9.0 — Manage several WHOOP straps, and see what each band does
+
+- **Manage several WHOOP straps.** If you own more than one WHOOP — a couple of 4.0s, a 5.0, or a mix — NOOP now tells them apart and lets you **pair, switch, rename and remove** each one from the **Devices** screen. Each strap is identified by its own Bluetooth identity, only one is ever active at a time, and your history is never mixed between devices. Cross-platform (iPhone, Mac, Android); the Android device database migrates cleanly from 3.8.0 (emulator-verified).
+- **A guided "Add a device" wizard.** Adding a device now **asks what you're adding** — WHOOP 5.0/MG, WHOOP 4.0, or a heart-rate strap — and gives the right pairing steps for that band (a 5/MG pairs differently from a 4.0), then scans the right transport. Coming-soon device types (Garmin, Amazfit/Zepp, Oura/Fitbit import) are shown on the roadmap.
+- **The Live screen links to Devices.** The live console now names the **active band** and has a **Manage devices** shortcut, so it's obvious where to pair or switch straps.
+- **Honest per-device capabilities.** Each device card now shows **what that band captures and what NOOP uses it for**, per model — so it's clear a 5/MG reports steps while a 4.0 doesn't, and a heart-rate strap drives live HR + Effort only. We also corrected misleading labels: no "Blood oxygen" where NOOP can't read an SpO₂ percentage off the strap (it never can — that only comes from a WHOOP CSV import), and skin temp / respiration are marked as the on-device estimates they are.
+
+---
+
 ## 3.8.0 — Connect a heart-rate strap (early access)
 
 - **A new Devices screen — NOOP reads more than just WHOOP now.** Pair a **standard Bluetooth heart-rate strap** (Polar, Wahoo, Coospo, a Garmin HRM, or the Amazfit Helio's HR broadcast) for **live heart rate + HRV**. The new **Devices** screen (System group) lists what's paired, lets you switch which strap is active, rename, or remove one (with a separate, deliberate "delete this device's data" path). Built on a device registry + a per-day source-ownership rule so **only one strap is ever active at a time and NOOP never mixes or double-counts data from two devices**.

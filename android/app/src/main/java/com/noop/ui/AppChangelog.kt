@@ -25,7 +25,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "3.8.0"
+    const val CURRENT_VERSION = "3.9.0"
 
     data class Release(
         val version: String,
@@ -36,6 +36,17 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "3.9.0",
+            title = "Manage several WHOOP straps — and see what each band does",
+            date = "June 2026",
+            items = listOf(
+                "Manage several WHOOP straps. Got more than one WHOOP — a couple of 4.0s, a 5.0, or a mix? NOOP now tells them apart and lets you pair, switch, rename and remove each one from the Devices screen. Only one strap is ever active at a time, and your history is never mixed between devices.",
+                "A guided way to add a device. \"Add a device\" now asks what you're adding — WHOOP 5.0/MG, WHOOP 4.0, or a heart-rate strap — and walks you through the right pairing steps for that band (a 5/MG pairs differently from a 4.0).",
+                "The Live screen points to your devices. The live console now shows which band is active and has a Manage devices shortcut, so it's obvious where to go to pair or switch straps.",
+                "Every device card now says what it actually does. Each band shows what it captures and what NOOP uses it for — so it's clear at a glance that, say, a 5/MG reports steps while a 4.0 doesn't. We also made the labels honest: no \"Blood oxygen\" where NOOP can't read an SpO2 percentage off the strap (it never can — a real % only comes from a WHOOP CSV import), and skin temp / respiration are marked as the on-device estimates they are.",
+            ),
+        ),
         Release(
             version = "3.8.0",
             title = "Connect a heart-rate strap (early access)",
