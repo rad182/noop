@@ -803,10 +803,12 @@ struct WorkoutsView: View {
         return f
     }()
 
+    // The "jmm" skeleton respects the device's 12-/24-hour setting (#337): "4:34 PM" where 12-hour is
+    // preferred, "16:34" where 24-hour is — instead of forcing 24-hour on everyone (matches TodayView).
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "HH:mm"
+        f.locale = Locale.current
+        f.setLocalizedDateFormatFromTemplate("jmm")
         return f
     }()
 

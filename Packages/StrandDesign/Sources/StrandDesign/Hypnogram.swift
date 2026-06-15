@@ -64,7 +64,8 @@ public struct Hypnogram: View {
     @State private var hoverIndex: Int? = nil
 
     private static let clockFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+        // "jmm" respects the device's 12-/24-hour setting (#337) rather than forcing 24-hour.
+        let f = DateFormatter(); f.locale = Locale.current; f.setLocalizedDateFormatFromTemplate("jmm"); return f
     }()
 
     /// Format a seconds-from-origin offset either as wall-clock (if nightStart
