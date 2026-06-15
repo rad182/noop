@@ -101,14 +101,20 @@ object AnalyticsEngine {
         resp: List<RespSample> = emptyList(),
         gravity: List<GravitySample> = emptyList(),
         steps: List<StepSample> = emptyList(),
-        // Calendar-day-scoped overrides for the ADDITIVE daily totals (steps + activeKcalEst) ONLY.
-        // When null, the totals fall back to the same window the rest of the analysis uses (preserving
-        // the pure-function contract). The caller (IntelligenceEngine) supplies a full
-        // [midnightUtc(day), midnightUtc(day)+86400) read here so a PAST day's late hours — which fall
-        // outside the ~42h night-detection window when the current UTC time-of-day is before noon — are
-        // still counted. Sleep / recovery / strain / workouts keep using hr/rr/resp/gravity/steps.
+        // Calendar-day-scoped overrides for the ADDITIVE daily totals (steps + activeKcalEst) AND
+        // workout detection + strain. When null, each falls back to the same night window the rest of
+        // the analysis uses (preserving the pure-function contract). The caller (IntelligenceEngine)
+        // supplies a full [localMidnight(day), localMidnight(day)+86400) read here so a day's late
+        // hours — which fall outside the ~42h night window (it ends at dayStart+12h ≈ noon) — are still
+        // seen. dayHr/daySteps drive the additive step + calorie totals; dayHr/dayGravity ALSO feed
+        // WorkoutDetector so an afternoon/evening workout is detected on its OWN calendar day instead of
+        // lagging to the next pass; dayHr ALSO drives strain ("Effort") so the day's load reflects the
+        // WHOLE calendar day, not midnight→noon (+ the night window's −30h prior-evening bleed). A
+        // workout straddling local midnight splits at the day boundary (same tradeoff as the totals).
+        // Sleep / recovery keep using hr/rr/resp/gravity — staging needs the pre-midnight night span.
         dayHr: List<HrSample>? = null,
         daySteps: List<StepSample>? = null,
+        dayGravity: List<GravitySample>? = null,
         // Wear-gated nightly skin-temp mean is harvested here (baseline-independent); IntelligenceEngine
         // seeds a personal baseline from these means across nights and re-derives skinTempDevC in pass 2
         // (same two-pass shape as avgHrv→recovery). (PR #85)
@@ -237,21 +243,29 @@ object AnalyticsEngine {
             )
         }
 
-        // ── Strain (day cardiovascular load over the full HR window) ──────────
+        // ── Strain ("Effort") — cardiovascular load over the full CALENDAR day ──
+        // Integrate dayHr ([localMidnight, +24h), clamped to now for today) when supplied so Effort
+        // covers the WHOLE day — an afternoon/evening workout lands in today's Effort same-day instead
+        // of being cut off at the night window's ≈ noon bound, and the prior evening's HR no longer
+        // bleeds in. Falls back to the night hr for pure-function callers/tests.
         val effMaxHR: Double? = maxHROverride
             ?: if (profile.age > 0) StrainScorer.tanakaHRmax(profile.age) else null
         val restForStrain = restingHRDaily?.toDouble() ?: StrainScorer.defaultRestingHR
         val strain = StrainScorer.strain(
-            hr = hr,
+            hr = dayHr ?: hr,
             maxHR = effMaxHR,
             restingHR = restForStrain,
             sex = profile.sex,
         )
 
         // ── Workouts ──────────────────────────────────────────────────────────
+        // Detect over the full CALENDAR day (dayHr/dayGravity) when supplied so a current-day
+        // afternoon/evening workout is caught on its own day rather than lagging until a later pass
+        // re-reads it through the next night window (which ends at ≈ noon). Falls back to the night
+        // window for pure-function callers/tests.
         val workouts = WorkoutDetector.detect(
-            hr = hr,
-            gravity = gravity,
+            hr = dayHr ?: hr,
+            gravity = dayGravity ?: gravity,
             restingHR = restingHRDaily?.toDouble(),
             maxHR = maxHROverride,
             age = if (profile.age > 0) profile.age else null,

@@ -252,6 +252,12 @@ object IntelligenceEngine {
             // device that owns the day, never a mix.
             val dayHr = repo.hrSamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
             val daySteps = repo.stepSamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
+            // Full calendar-day gravity for WORKOUT detection. The night window above ends at
+            // dayStart+12h (≈ noon), so an afternoon/evening workout sits outside it and was only
+            // detected once a later pass re-read it through the next night window — a ~day lag. This
+            // [localMidnight, +24h) read (today: clamped to now by the DAO) lets the detector see the
+            // whole day, so a 5 pm run shows up the same day.
+            val dayGrav = repo.gravitySamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
 
             val res = AnalyticsEngine.analyzeDay(
                 day = day,
@@ -262,6 +268,7 @@ object IntelligenceEngine {
                 steps = steps,
                 dayHr = dayHr,
                 daySteps = daySteps,
+                dayGravity = dayGrav,
                 skinTemp = skin,
                 profile = profile,
                 baselines = baselines1,
