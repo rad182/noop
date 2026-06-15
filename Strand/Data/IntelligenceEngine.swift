@@ -165,10 +165,17 @@ final class IntelligenceEngine: ObservableObject {
             // one device that owns the day, never a mix.
             let dayHr = (try? await store.hrSamples(deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
             let daySteps = (try? await store.stepSamples(deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
+            // Full calendar-day gravity for WORKOUT detection. The night window above ends at
+            // dayStart+12h (≈ noon), so an afternoon/evening workout sits outside it and was only
+            // detected once a later pass re-read it through the next night window — a ~day lag. This
+            // [localMidnight, localMidnight+24h) read (today: clamped to `now` by the store) lets the
+            // detector see the whole day, so a 5 pm run shows up on the same day.
+            let dayGrav = (try? await store.gravitySamples(deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
 
             let res = await Task.detached(priority: .utility) {
                 AnalyticsEngine.analyzeDay(day: day, hr: hr, rr: rr, resp: resp, gravity: grav,
                                            steps: steps, dayHr: dayHr, daySteps: daySteps,
+                                           dayGravity: dayGrav,
                                            skinTemp: skin,
                                            profile: up, baselines: baselines1, maxHROverride: maxHR,
                                            tzOffsetSeconds: tzOffset)

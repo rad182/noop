@@ -131,16 +131,29 @@ public enum AnalyticsEngine {
                                   gravity: [GravitySample] = [],
                                   steps: [StepSample] = [],
                                   // Calendar-day-scoped overrides for the ADDITIVE daily totals
-                                  // (steps + activeKcalEst) ONLY. When nil, the totals fall back to
-                                  // the same window the rest of the analysis uses (preserving the
-                                  // pure-function contract). The caller (IntelligenceEngine) supplies
-                                  // a full [midnightUtc(day), midnightUtc(day)+86400) read here so a
-                                  // PAST day's late hours — which fall outside the ~42h
-                                  // night-detection window when the current UTC time-of-day is before
-                                  // noon — are still counted. Sleep / recovery / strain / workouts
-                                  // keep using hr/rr/resp/gravity/steps.
+                                  // (steps + activeKcalEst) AND workout detection. When nil, each
+                                  // falls back to the same night window the rest of the analysis uses
+                                  // (preserving the pure-function contract). The caller
+                                  // (IntelligenceEngine) supplies a full
+                                  // [localMidnight(day), localMidnight(day)+86400) read here so a
+                                  // day's late hours — which fall outside the ~42h night-detection
+                                  // window (it ends at dayStart+12h ≈ noon) — are still seen.
+                                  //
+                                  // dayHr/daySteps drive the additive step + calorie totals.
+                                  // dayHr/dayGravity ALSO feed WorkoutDetector so an afternoon /
+                                  // evening workout is detected on its OWN calendar day instead of
+                                  // lagging to the next pass (the old night window only reached noon,
+                                  // so a 5 pm run was invisible until tomorrow's run re-read it). A
+                                  // workout straddling local midnight is split at the day boundary —
+                                  // the same accepted tradeoff the step/calorie totals already make.
+                                  // dayHr ALSO drives Strain / "Effort" so the day's load reflects the
+                                  // WHOLE calendar day (afternoon workouts included), not midnight→noon.
+                                  //
+                                  // Sleep / recovery keep using hr/rr/resp/gravity — staging needs the
+                                  // pre-midnight night span the calendar day omits.
                                   dayHr: [HRSample]? = nil,
                                   daySteps: [StepSample]? = nil,
+                                  dayGravity: [GravitySample]? = nil,
                                   // Wear-gated nightly skin-temp mean is harvested here
                                   // (baseline-independent); IntelligenceEngine seeds a personal
                                   // baseline from these means across nights and re-derives
@@ -258,15 +271,25 @@ public enum AnalyticsEngine {
                 skinTempDev: skinTempDevC)  // symmetric penalty; drops + renormalizes when nil
         }
 
-        // ── Strain / "Effort" (day cardiovascular load over the full HR window) ──
+        // ── Strain / "Effort" (cardiovascular load over the full CALENDAR day) ──
+        // Integrate dayHr ([localMidnight, localMidnight+24h), clamped to `now` for today) when the
+        // caller supplies it, so Effort covers the WHOLE day — an afternoon/evening workout lands in
+        // today's Effort same-day instead of being cut off at the night window's ≈ noon bound, and
+        // the prior evening's HR (the night window's −30h tail) no longer bleeds in. Falls back to the
+        // night `hr` for pure-function callers/tests.
         let effMaxHR: Double? = maxHROverride ?? (profile.age > 0 ? StrainScorer.tanakaHRmax(age: profile.age) : nil)
         let restForStrain = restingHRDaily.map(Double.init) ?? StrainScorer.defaultRestingHR
-        let strain = StrainScorer.strain(hr, maxHR: effMaxHR, restingHR: restForStrain,
+        let strain = StrainScorer.strain(dayHr ?? hr, maxHR: effMaxHR, restingHR: restForStrain,
                                          sex: profile.sex)
 
         // ── Workouts ──────────────────────────────────────────────────────────
+        // Detect over the full CALENDAR day (dayHr/dayGravity) when the caller supplies it, so a
+        // current-day afternoon/evening workout is caught on its own day rather than lagging until
+        // a later pass re-reads it through the next night window (which ends at ≈ noon). Falls back
+        // to the night window for pure-function callers/tests. restingHR still comes from the night's
+        // sleep sessions; nil → WorkoutDetector derives it from the day's own HR floor.
         let workouts = WorkoutDetector.detect(
-            hr: hr, gravity: gravity,
+            hr: dayHr ?? hr, gravity: dayGravity ?? gravity,
             restingHR: restingHRDaily.map(Double.init),
             maxHR: maxHROverride,
             age: profile.age > 0 ? profile.age : nil,
