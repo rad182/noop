@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "4.5.4"
+    static let currentVersion = "4.5.5"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,21 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "4.5.5",
+            title: "Today's Effort no longer drops to zero",
+            date: "June 2026",
+            items: [
+                "**Fixed: the Effort number on Today could briefly show the right value, then fall to 0.** The live \"so far today\" Effort recalculation could under-read — especially on a WHOOP 5/MG with sparser heart rate, or after you'd logged a workout — and replace the real Effort you'd already earned. The gauge now never shows **less** than today's earned Effort. (#489 / #506)",
+                "**The strap log is now in Settings on iPhone too** (Settings → Strap → Copy / Save), matching Mac — so it's easy to grab for a bug report without hunting on the Live screen. (#509)",
+            ]),
+        Release(
+            version: "4.5.4",
+            title: "Find your strap log in Settings (macOS)",
+            date: "June 2026",
+            items: [
+                "Added a **Strap log** shortcut to **Settings → Strap** on Mac — Copy or Save the log right from Settings instead of hunting for it on the Live screen. It's the one thing needed to diagnose a bug, so it should be easy to reach.",
+            ]),
         Release(
             version: "4.5.3",
             title: "Sleep fix for WHOOP 4.0 + accurate WHOOP 5/MG steps",

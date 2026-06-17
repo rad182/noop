@@ -17,6 +17,11 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
 
 ---
 
+## 4.5.5 — Today's Effort no longer drops to zero (all platforms)
+
+- **#489 / #506 — the Today Effort gauge could briefly show the correct value, then fall to 0.** The live in-progress Effort (recomputed over today's raw heart rate, midnight→now) can UNDER-read — on a WHOOP 5/MG with sparse HR, or when a logged workout's load isn't in the raw stream — and it was preferred over the day's stored Effort whenever it was non-nil, so it replaced a real value (e.g. a genuine 38.3 after a morning workout) with a live 0. The Today gauge now floors the live value at the day's already-earned Effort (`max(live, stored)`); Effort accrues over a day and must never visibly drop. Safe by construction: `displayDay`/`displayMetric` for today is always today's row (or nil), never a prior day, so this can't resurrect a stale day. Swift + Android.
+- **#509 — the strap log is now reachable from Settings on iPhone too** (it was macOS-only in 4.5.4). Settings → Strap → Copy / Save, building the same text as the Live screen's log card (`LiveState.exportableLogText()`).
+
 ## 4.5.4 — Find your strap log in Settings (macOS)
 
 - **macOS: a Strap log shortcut in Settings.** The strap log — the thing the maintainer needs when you report a bug — lived only on the Live screen, and people kept hunting for it (#507, #17). It's now also in **Settings → Strap**, with **Copy** and **Save…**, building the exact same text as the Live screen's log card (shared via `LiveState.exportableLogText()`, so the two can't drift). No behaviour change beyond the new shortcut; iPhone and Android are unchanged (Android already had it in Settings).

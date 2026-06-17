@@ -591,10 +591,9 @@ struct SettingsView: View {
                     .disabled(!live.connected && !live.bonded)
                 }
 
-                #if os(macOS)
                 Divider().overlay(StrandPalette.hairline)
-                // MARK: Strap log (macOS) — a Settings shortcut so people don't have to hunt for it on the
-                // Live screen (#507: a 4.0 owner couldn't find it). Same text as the Live screen's log card.
+                // MARK: Strap log — a Settings shortcut so people don't have to hunt for it on the Live
+                // screen (#507: couldn't find it on Mac; #509: same on iPhone). Same text as the Live card.
                 HStack(spacing: 12) {
                     Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
@@ -610,7 +609,6 @@ struct SettingsView: View {
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
-                #endif
 
                 Divider().overlay(StrandPalette.hairline)
 

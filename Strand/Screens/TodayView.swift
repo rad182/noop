@@ -786,7 +786,16 @@ struct TodayView: View {
     /// (#402). Falls back to the stored `strain` when there isn't yet enough of today's HR to score
     /// (StrainScorer.minReadings). Navigated past days always use the stored row.
     private func effortStrain(_ d: DailyMetric?) -> Double? {
-        if selectedDayOffset == 0, let live = liveTodayStrain { return live }
+        if selectedDayOffset == 0, let live = liveTodayStrain {
+            // Effort accrues over a day and must never visibly DROP. The in-progress recompute (raw day
+            // HR, midnight→now) can UNDER-read when today's HR is sparse or a logged workout's load isn't
+            // in the raw stream — e.g. a 5/MG user who trained this morning saw today's real 38.3 get
+            // replaced by a live 0 (#489/#506). Floor at the day's already-earned Effort. `d` (displayDay)
+            // for today is ALWAYS today's row or nil — never a prior day — so this can't resurrect a stale
+            // day; it only stops the gauge dropping below what's already been counted today.
+            if let stored = d?.strain { return Swift.max(live, stored) }
+            return live
+        }
         return d?.strain
     }
 

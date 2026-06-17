@@ -440,7 +440,13 @@ fun TodayScreen(viewModel: AppViewModel, onSupport: () -> Unit = {}) {
         // Honest "why is Effort 0?" caption (#482/#480) — only when today's Effort is a real
         // near-zero (HR present but never crossed the cardio zone), so a calm day reads as explained
         // rather than broken. Mirrors the iOS effortZeroNote. A low-HR day honestly earns ~0.
-        val todayEffort = if (selectedDayOffset == 0) (liveTodayStrain ?: displayMetric?.strain) else null
+        // Effort accrues over a day and must never visibly drop: floor the in-progress value at the day's
+        // already-earned strain (#489/#506). displayMetric for today is today's row or null, never a prior
+        // day, so this can't resurrect a stale day — it only stops the gauge dropping below what's earned.
+        val todayEffort = if (selectedDayOffset == 0) {
+            val live = liveTodayStrain; val stored = displayMetric?.strain
+            if (live != null && stored != null) maxOf(live, stored) else (live ?: stored)
+        } else null
         if (todayEffort != null && todayEffort < 1.0) {
             Row(
                 modifier = Modifier.padding(horizontal = 2.dp),
@@ -644,10 +650,14 @@ private fun ScoreHeroRow(
     onScoreInfo: (ScoreSection) -> Unit,
 ) {
     val recovery = day?.recovery
-    // Prefer the live in-progress Effort for today; fall back to the stored daily strain otherwise. The
-    // effective value drives the gauge number AND the has-data / "—" branch, so the ring only reads "No
-    // Data" when neither a live nor a stored Effort exists. Mirrors the iOS live-Effort gauge. (#402)
-    val strain = liveTodayStrain ?: day?.strain
+    // Prefer the live in-progress Effort for today, but never BELOW the day's already-earned strain
+    // (#489/#506: a live under-read replaced today's real Effort with 0). The effective value drives the
+    // gauge number AND the has-data / "—" branch, so the ring only reads "No Data" when neither exists.
+    // Mirrors the iOS live-Effort gauge. (#402)
+    val strain = run {
+        val live = liveTodayStrain; val stored = day?.strain
+        if (live != null && stored != null) maxOf(live, stored) else (live ?: stored)
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
